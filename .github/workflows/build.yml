@@ -22,18 +22,23 @@ jobs:
       - name: Build Tauri
         run: npm run tauri build
 
-      - name: List build outputs
+      - name: Show build outputs
         run: |
-          echo "=== EXE ==="
-          Get-ChildItem -Path "src-tauri/target/x86_64-pc-windows-msvc/release" -Filter "*.exe" -Recurse | Select-Object FullName, Length
-          echo "=== BUNDLE ==="
-          Get-ChildItem -Path "src-tauri/target/x86_64-pc-windows-msvc/release/bundle" -Recurse | Select-Object FullName, Length
+          echo "=== dist/ ==="
+          Get-ChildItem -Recurse dist/ -File | Select-Object FullName, Length
+          echo "=== target ==="
+          Get-ChildItem -Path "src-tauri/target" -Directory | Select-Object Name
+          echo "=== release ==="
+          if (Test-Path "src-tauri/target/release") {
+            Get-ChildItem "src-tauri/target/release" -File | Select-Object Name, Length
+          }
+          echo "=== bundle ==="
+          Get-ChildItem "src-tauri/target" -Recurse -Include "*.exe","*.msi" | Select-Object FullName, Length
 
-      - name: Upload artifacts
+      - name: Upload all artifacts
         uses: actions/upload-artifact@v4
         with:
           name: luna-agent-windows
           path: |
-            src-tauri/target/x86_64-pc-windows-msvc/release/luna-agent.exe
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+            dist/
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/
