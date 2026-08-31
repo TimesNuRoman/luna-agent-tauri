@@ -20,20 +20,20 @@ jobs:
         run: npm ci
 
       - name: Build Tauri
-        run: npm run tauri build -- --verbose
-        env:
-          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+        run: npm run tauri build
 
-      - name: List artifacts
-        run: Get-ChildItem -Path "src-tauri/target" -Recurse -Filter "*.exe" | Select-Object FullName, Length
+      - name: List build outputs
+        run: |
+          echo "=== EXE ==="
+          Get-ChildItem -Path "src-tauri/target/x86_64-pc-windows-msvc/release" -Filter "*.exe" -Recurse | Select-Object FullName, Length
+          echo "=== BUNDLE ==="
+          Get-ChildItem -Path "src-tauri/target/x86_64-pc-windows-msvc/release/bundle" -Recurse | Select-Object FullName, Length
 
-      - name: Upload exe
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: luna-agent-windows
           path: |
             src-tauri/target/x86_64-pc-windows-msvc/release/luna-agent.exe
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-          if-no-files-found: warn
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
