@@ -7,8 +7,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
-    "devtools": true
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
     "withGlobalTauri": true,
@@ -32,7 +31,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["msi", "nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -40,7 +39,11 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "windows": { "webviewInstallMode": { "type": "embedBootstrapper" } }
+    "windows": {
+      "webviewInstallMode": { "type": "embedBootstrapper" }
+    }
   },
-  "plugins": { "shell": { "open": true } }
+  "plugins": {
+    "shell": { "open": true }
+  }
 }
