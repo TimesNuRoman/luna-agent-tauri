@@ -2,8 +2,6 @@ name: Build Luna Agent
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
 
 jobs:
   build-windows:
@@ -22,23 +20,16 @@ jobs:
       - name: Build Tauri
         run: npm run tauri build
 
-      - name: Show build outputs
+      - name: Find exe files
         run: |
-          echo "=== dist/ ==="
-          Get-ChildItem -Recurse dist/ -File | Select-Object FullName, Length
-          echo "=== target ==="
-          Get-ChildItem -Path "src-tauri/target" -Directory | Select-Object Name
-          echo "=== release ==="
-          if (Test-Path "src-tauri/target/release") {
-            Get-ChildItem "src-tauri/target/release" -File | Select-Object Name, Length
-          }
-          echo "=== bundle ==="
-          Get-ChildItem "src-tauri/target" -Recurse -Include "*.exe","*.msi" | Select-Object FullName, Length
+          Get-ChildItem . -Recurse -Include "*.exe","*.msi" -File | Select-Object FullName, @{N='SizeMB';E={[math]::Round($_.Length/1MB,2)}}
 
-      - name: Upload all artifacts
+      - name: Upload exe
         uses: actions/upload-artifact@v4
         with:
-          name: luna-agent-windows
+          name: luna-agent-exe
           path: |
-            dist/
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/
+            src-tauri/target/x86_64-pc-windows-msvc/release/luna-agent.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+          if-no-files-found: error
