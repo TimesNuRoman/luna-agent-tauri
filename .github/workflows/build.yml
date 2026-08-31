@@ -20,16 +20,17 @@ jobs:
       - name: Build Tauri
         run: npm run tauri build
 
-      - name: Find exe files
+      - name: Find all output files
         run: |
-          Get-ChildItem . -Recurse -Include "*.exe","*.msi" -File | Select-Object FullName, @{N='SizeMB';E={[math]::Round($_.Length/1MB,2)}}
+          Write-Host "=== ALL FILES ==="
+          Get-ChildItem . -Recurse -Include "*.exe","*.msi" -File | ForEach-Object { Write-Host "$($_.FullName) [$([math]::Round($_.Length/1MB,2)) MB]" }
 
-      - name: Upload exe
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: luna-agent-exe
+          name: luna-agent-v2
           path: |
             src-tauri/target/x86_64-pc-windows-msvc/release/luna-agent.exe
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
-          if-no-files-found: error
+            dist/
