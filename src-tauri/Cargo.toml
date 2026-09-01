@@ -2,20 +2,85 @@
 name = "luna-agent"
 version = "1.0.0"
 edition = "2021"
+license = "Proprietary"
+publish = false
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["devtools"] }
+tauri = { version = "2", features = ["devtools", "tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-stt = { version = "0.2", default-features = false }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-clipboard-manager = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "cookies", "multipart"], default-features = false }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 urlencoding = "2"
+keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service"] }
+ignore = "0.4"
+similar = "2"
+thiserror = "1"
+futures = "0.3"
+tokio-stream = "0.1"
+url = "2"
 open = "5"
+regex = "1"
+xcap = "0.9"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+base64 = "0.22"
+cpal = "0.15"
+teloxide = { version = "0.13", default-features = false, features = ["macros", "rustls"] }
+
+# ---- Memory subsystem (Phase M0 + M1) ----
+# M0: petgraph (in-RAM knowledge graph), flate2 (L3 gzip archive),
+# parking_lot (faster locks), once_cell (already in tree), uuid (event ids).
+# M1: rusqlite (FTS5-backed index for L1 events).
+# M2: lancedb + fastembed — added in Phase M2 (ADR-0009 / 0008) so the
+# ~50 MB ONNX runtime doesn't bloat the binary until we actually need
+# embeddings.
+petgraph = "0.6"
+flate2 = "1"
+parking_lot = "0.12"
+uuid = { version = "1", features = ["v4"] }
+# once_cell: used directly in lib.rs (APP_HANDLE_FOR_COMMANDS) and
+# telegram.rs (bot state OnceCell). Tauri / teloxide also pull it in
+# transitively, but we declare it explicitly so direct uses compile.
+once_cell = "1"
+# M1: rusqlite (SQLite-backed index for L1 events)
+rusqlite = { version = "0.31", features = ["bundled"] }
+# M2: `async_trait` for the SemanticStore trait (LanceDB / bge-small
+# path) and the GraphStore methods. Real LanceDB + fastembed land in
+# M2.5 (see ADR-0008); for now M2 uses a file-backed L2 with a
+# HashEmbedder.
+async-trait = "0.1"
+
+# ---- Self-evolution subsystem (Phase E0+) ----
+# Self-evolution lets Luna read & modify its own source code under user
+# supervision. Phase E0 (this commit) adds only read-only introspection,
+# so we only need `chrono` (ISO 8601 timestamps for active.json) and
+# `walkdir` (file counting for SelfInfo). Subsequent phases will add:
+#   - E1 (snapshots): `tempfile` for sandbox dirs
+#   - E2 (LLM diagnose): none — reuses ai_chat_stream
+#   - E3 (sandbox): `tokio::process` (already via tokio "full"), tempfile
+#   - E4 (apply/rollback): `git2` (optional, fallback to git CLI)
+chrono = { version = "0.4", features = ["serde"] }
+walkdir = "2"
+
+# ---- Background agent subsystem (Phase M0+) ----
+# Cursor-Composer-style decoupled tasks. Phase M0 (this commit) adds
+# the persistence + queue + 4 read-only Tauri commands; later phases
+# add the runner (M1), sub-agents (M2), polish (M3), hardening (M4).
+#   - `tokio-util` for `CancellationToken` (cooperative cancel)
+#   - `tauri-plugin-notification` for "task done" desktop toasts
+tokio-util = { version = "0.7", features = ["rt"] }
+tauri-plugin-notification = "2"
 
 [profile.release]
 panic = "abort"
@@ -23,3 +88,18 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# Local patch: tauri-plugin-stt v0.2.2 is hardcoded to use `app_data_dir()`
+# (`%APPDATA%\com.luna.agent\whisper-models\`), which is "system space" in
+# the user's view. The vendored copy under `vendor/tauri-plugin-stt/` is
+# patched so `models_dir()` prefers, in order:
+#   1. `$LUNA_WHISPER_MODELS_DIR` env var (explicit override)
+#   2. `resource_dir()` (next to the .exe — what the user sees as "the
+#      app's folder"). In dev this lands at
+#      `src-tauri/target/<profile>/whisper-models/`.
+#   3. `app_local_data_dir()` (`%LOCALAPPDATA%\com.luna.agent\`) — fallback
+#      when the install dir is read-only (e.g. `Program Files`).
+#   4. CWD (last-ditch).
+# Set `LUNA_WHISPER_MODELS_DIR` to override at runtime.
+[patch.crates-io]
+tauri-plugin-stt = { path = "../vendor/tauri-plugin-stt" }
