@@ -1,0 +1,95 @@
+# Mephistopheles (Мефистофель) — full-stack design-агент.
+#
+# Три кита: visual (MiniMax image-01) + code (Svelte 4 + Tauri 2) + copy.
+# Культурный якорь — Marilyn Manson как копирайтер: провокация, театральность,
+# "продать душу за первый экран".
+#
+# Validation rules (enforced by registry::load_one):
+#   * `id` non-empty, unique across the dir
+#   * `display_name`, `default_model`, `sub_agent_model` non-empty
+#   * `allowed_tools` only references names from
+#     services/agent/personas/registry.rs::VALID_TOOLS
+#   * `system_prompt_path` resolves to an existing file relative
+#     to this file's directory
+#
+# ## Naming
+# Internal id is "mephistopheles" (used in git author, logs, task ids).
+# In the UI:
+#   * manual trigger → display_name "Мефистофель"
+#     (the operator you've summoned on purpose)
+#   * auto-trigger (Phase P2+) → display_name_alt "Mephisto"
+#     (compact form for status pills)
+
+id               = "mephistopheles"
+display_name     = "Мефистофель"
+display_name_alt = "Mephisto"
+role             = "Full-stack design-агент: визуал (image-01), Svelte-скелет (компоненты/страницы/app), и пиздатый копирайт. Проприетарный design system в Manson-Pale-Empire эстетике"
+
+system_prompt_path = "prompts/mephistopheles_system.md"
+
+# Per-mode model override. Mode keys are freeform strings looked up
+# in the registry's `model_per_mode` map; anything not in the map
+# falls back to `default_model`.
+#
+# Recommendation:
+#   - design_synthesis / scaffold_generation / copy_generation → M3 (deep)
+#   - icon_iteration → M2.7-highspeed (cheap, tight loop)
+[model_per_mode]
+design_synthesis    = "MiniMax-M3"
+image_prompting     = "MiniMax-M3"
+image_critique      = "MiniMax-M3"
+scaffold_generation = "MiniMax-M3"
+copy_generation     = "MiniMax-M3"
+copy_variants       = "MiniMax-M3"
+icon_iteration      = "MiniMax-M2.7-highspeed"
+generic             = "MiniMax-M3"
+
+default_model    = "MiniMax-M3"
+sub_agent_model  = "MiniMax-M2.7-highspeed"
+
+# Whitelist of tools the supervisor exposes. Each persona tool must
+# be registered in services::agent::personas::registry::VALID_TOOLS
+# AND have a handler in services::agent::mephisto_tools::execute.
+allowed_tools = [
+  # ---- Workspace — read (3) ----
+  "read_file",
+  "list_dir",
+  "search_workspace",
+  # ---- Workspace — mutate (2) — for writing into .luna/design/ ----
+  "create_file",
+  "edit_file",
+  # ---- Design — visual (6) ----
+  "design_image_generate",
+  "design_palette_generate",
+  "design_brief_get",
+  "design_brief_set",
+  "design_manifest_get",
+  "design_manifest_set",
+  # ---- Design — code (2) ----
+  "design_scaffold_generate",
+  "design_component_propose",
+  # ---- Design — copy (2) ----
+  "design_copy_generate",
+  "design_copy_apply",
+  # ---- Apply (1) — tokens export / scaffold apply with allow-list ----
+  "design_apply",
+  # ---- Recursive sub-agent (1) — read-only M2.7 sub-agents ----
+  "dispatch_subagent",
+]
+
+# Design tasks are longer than read-only analysis (Raziel 30, MorningStar 60).
+# A full design session (palette + 3-5 images + 2-3 components + 4-5 copy
+# contexts + brief/manifest edits) typically needs 25-40 tool-use cycles.
+# 50 gives headroom for a couple of regeneration loops.
+max_steps        = 50
+# Sub-agents are expensive (each one is a full M2.7 round-trip).
+# 4 covers: palette critic, copy critic, scaffold critic, image critic.
+max_subagents    = 4
+# 2M M3 tokens ≈ 4-8 design sessions. Plus per-image ($0.04) and
+# per-copy-call (~$0.015) tracked separately via cost.rs.
+max_cost_tokens  = 2_000_000
+
+# Default triggers (informational; the actual firing is wired in lib.rs).
+# v1 fires only `manual` — slash `/design` + button. Auto-trigger is v2.
+[[default_triggers]]
+kind = "manual"

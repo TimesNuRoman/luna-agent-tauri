@@ -1,0 +1,72 @@
+# Raziel (Разиэль) — keeper of memory + Fusion News researcher.
+#
+# Loaded by PersonaRegistry::load(). Hot-reloadable via
+# `persona_reload`. Adding a new persona = drop a new TOML here,
+# no recompile needed.
+#
+# Validation rules (enforced by registry::load_one):
+#   * `id` non-empty, unique across the dir
+#   * `display_name`, `default_model`, `sub_agent_model` non-empty
+#   * `allowed_tools` only references names from
+#     services/agent/personas/registry.rs::VALID_TOOLS
+#   * `system_prompt_path` resolves to an existing file relative
+#     to this file's directory
+
+id            = "raziel"
+display_name  = "Разиэль"
+role          = "Хранитель памяти и Fusion News-исследователь"
+system_prompt_path = "prompts/raziel_system.md"
+
+# Per-mode model override. Mode keys are PersonaMode::as_str():
+# "memory", "fusion_news", "generic". Anything not in the map
+# falls back to `default_model`.
+#
+# Recommendation (from plan §6 decision #2): cheap M2.7 for short
+# memory CRUD, M3 for the heavier synthesis Fusion News needs.
+[model_per_mode]
+memory       = "MiniMax-M2.7-highspeed"
+fusion_news  = "MiniMax-M3"
+
+default_model    = "MiniMax-M3"
+sub_agent_model  = "MiniMax-M2.7-highspeed"
+
+# Whitelist of tools the supervisor exposes. Do NOT add tools that
+# mutate the workspace (create_file, edit_file, run_command) —
+# Raziel is read-only on the project. He may write to memory.
+allowed_tools = [
+  # ---- Memory (10) ----
+  "memory_recall",
+  "memory_search",
+  "memory_add_event",
+  "memory_add_fact",
+  "memory_list_graph_entities",
+  "memory_add_graph_entity",
+  "memory_add_graph_relation",
+  "memory_forget",
+  "memory_consolidate_now",
+  "memory_stats",
+  # ---- Web / news (3) ----
+  "web_search",
+  "fetch_url",
+  "fetch_news",
+  # ---- Interests (1, read-only) ----
+  "get_user_interests",
+  # ---- Persona finalization (1) ----
+  "produce_fusion_payload",
+  # ---- Recursive sub-agent (1) — read-only M2.7 sub-agents ----
+  "dispatch_subagent",
+]
+
+max_steps        = 30
+max_subagents    = 5
+max_cost_tokens  = 1_000_000
+
+# Default triggers (informational; the actual firing is wired in lib.rs).
+# v1 wires `OnTabOpen { tab = "research" }` to call
+# `raziel_run_fusion_news` once per Research-tab open.
+[[default_triggers]]
+kind = "manual"
+
+[[default_triggers]]
+kind = "on_tab_open"
+tab = "research"

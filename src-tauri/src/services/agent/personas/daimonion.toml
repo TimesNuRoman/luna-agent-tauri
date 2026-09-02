@@ -1,0 +1,108 @@
+# Daimonion (Δαιμόνιον) — multimodal voice assistant with screen vision.
+#
+# Loaded by PersonaRegistry::load(). Hot-reloadable via
+# `persona_reload`. Adding a new persona = drop a new TOML here,
+# no recompile needed.
+#
+# Validation rules (enforced by registry::load_one):
+#   * `id` non-empty, unique across the dir
+#   * `display_name`, `default_model`, `sub_agent_model` non-empty
+#   * `allowed_tools` only references names from
+#     services/agent/personas/registry.rs::VALID_TOOLS
+#   * `system_prompt_path` resolves to an existing file relative
+#     to this file's directory
+#
+# ## Naming
+# Internal id is "daimonion" (used in git author, logs, task ids).
+# In the UI:
+#   * auto-triggered (wake-word / VAD) → display_name "Daimonion"
+#     (the inner voice that arrives when needed)
+#   * manual trigger (button)         → display_name_alt "Даймонион"
+#     (the assistant you summoned on purpose)
+# The supervisor emits both names in live events; the front-end picks
+# the right one based on the trigger kind.
+#
+# ## Lineage (dark-occult, like Lucifer / Azazel / Raziel / Mephistopheles)
+# Daimonion is the **δαίμων (daemon)** in the original Socratic sense —
+# not an evil spirit, but a "little inner voice" that whispers guidance
+# in the moment. Daimonion is the assistant that is *always among
+# people* — voice-first, screen-aware, never far from the user.
+#
+# ## Pipeline (D0+)
+# cpal (mic) → VAD (energy threshold) → STT (MiniMax ASR) → text
+# text → LLM (MiniMax-M3, optional vision frame) → text response
+# text → TTS (MiniMax speech-02, streaming chunks) → audio out
+# End-to-end latency budget: ≤ 1.5 s p50, ≤ 2.5 s p95.
+
+id            = "daimonion"
+display_name  = "Daimonion"
+display_name_alt = "Даймонион"
+role          = "Голосовой ассистент с vision: видит экран, говорит и слушает в реальном времени"
+
+system_prompt_path = "prompts/daimonion_system.md"
+
+# Per-mode model override. Mode keys are PersonaMode::as_str():
+# "memory", "fusion_news", "heal", "audit", "generic". Anything not
+# in the map falls back to `default_model`. For Daimonion the only
+# mode that matters in D0 is `generic` (the supervisor runs generic
+# for voice chats); the per-mode map is reserved for future phases
+# (D2 short replies, D3 multimodal-with-vision).
+#
+# Recommendation (D0): M3 for natural conversation, M2.7 for cheap
+# short acknowledgements ("ok", "вижу", "сейчас гляну").
+[model_per_mode]
+generic = "MiniMax-M3"
+
+default_model    = "MiniMax-M3"
+sub_agent_model  = "MiniMax-M2.7-highspeed"
+
+# Whitelist of tools the supervisor exposes.
+#
+# Daimonion is **read-only on the workspace** in D0 — it can look at
+# files and search the project, but never edits, never runs shell
+# commands. Mutations stay with Lucifer. Daimonion's job is to
+# *talk and see*, not to fix.
+#
+# Vision frames come from the screen-capture pipeline (xcap +
+# services::vision), not through tools — the supervisor injects the
+# latest frame into the request when Daimonion asks for it via a
+# special marker. The TTS / STT / VAD sides are also outside the
+# tool surface; the persona only sees text in / text out.
+allowed_tools = [
+  # ---- Workspace — read (3) ----
+  "read_file",
+  "list_dir",
+  "search_workspace",
+  # ---- Memory (5) — for personalisation: recall user's prior
+  #      preferences, projects, conversations ----
+  "memory_recall",
+  "memory_search",
+  "memory_add_event",
+  "memory_add_fact",
+  "memory_stats",
+  # ---- Web / research (2) ----
+  "web_search",
+  "fetch_url",
+  # ---- Recursive sub-agent (1) — read-only M2.7 sub-agents ----
+  "dispatch_subagent",
+]
+
+# Voice dialogues are typically shorter than tool-heavy heals, but
+# can run longer (Daimonion might dispatch several sub-agents to
+# gather context before answering). 40 is a sane bound.
+max_steps        = 40
+# Sub-agents are expensive. 3 is enough for "fetch context from
+# Raziel, look at git log, dispatch a focused investigation".
+max_subagents    = 3
+# 1.5M tokens ≈ $X at M3 pricing (see services/agent/cost.rs).
+# Voice sessions are bursty but bounded — 1.5M is several full
+# conversation cycles before we hit the cap.
+max_cost_tokens  = 1_500_000
+
+# Default triggers (informational; the actual firing is wired in
+# lib.rs::setup). D0 wires only `manual` (Daimonion button in UI
+# and Space-bar push-to-talk). D1 will add `voice_started` /
+# `voice_paused` triggers once the VAD pipeline ships — those
+# variants will be added to PersonaTrigger at that time.
+[[default_triggers]]
+kind = "manual"

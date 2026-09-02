@@ -1,0 +1,110 @@
+# Lucifer (Люцифер) / Утренняя Звезда — healer / project maintenance.
+#
+# Loaded by PersonaRegistry::load(). Hot-reloadable via
+# `persona_reload`. Adding a new persona = drop a new TOML here,
+# no recompile needed.
+#
+# Validation rules (enforced by registry::load_one):
+#   * `id` non-empty, unique across the dir
+#   * `display_name`, `default_model`, `sub_agent_model` non-empty
+#   * `allowed_tools` only references names from
+#     services/agent/personas/registry.rs::VALID_TOOLS
+#   * `system_prompt_path` resolves to an existing file relative
+#     to this file's directory
+#
+# ## Naming
+# Internal id is "lucifer" (used in git author, logs, task ids).
+# In the UI:
+#   * auto-triggered (cron, on_build_fail) → display_name "Утренняя Звезда"
+#     (the healer that arrives when you need it)
+#   * manual trigger                     → display_name_alt "Люцифер"
+#     (the operator you've summoned on purpose)
+# The supervisor emits both names in live events; the front-end picks
+# the right one based on the trigger kind.
+
+id            = "lucifer"
+display_name  = "Утренняя Звезда"
+display_name_alt = "Люцифер"
+role          = "Healer — держит workspace в рабочем состоянии: fix build, fix tests, восстанавливает green state"
+
+system_prompt_path = "prompts/morningstar_system.md"
+
+# Per-mode model override. Mode keys are PersonaMode::as_str():
+# "heal", "audit", "generic". Anything not in the map
+# falls back to `default_model`.
+#
+# Recommendation:
+#   - "heal": M3 for the fix loop (multi-step reasoning, planning)
+#   - "audit": M2.7-highspeed for cheap read-only sweeps
+#   - "generic": M3 (parity with heal)
+[model_per_mode]
+heal    = "MiniMax-M3"
+audit   = "MiniMax-M2.7-highspeed"
+generic = "MiniMax-M3"
+
+default_model    = "MiniMax-M3"
+sub_agent_model  = "MiniMax-M2.7-highspeed"
+
+# Whitelist of tools the supervisor exposes.
+#
+# The 6 `git_*` tools are typed wrappers around the underlying `git`
+# CLI. They live in `services/agent/git_tools.rs` and enforce safety
+# boundaries (no --force-push, no --hard reset, no branch -D).
+# The `run_command` tool is still exposed because we need it for
+# `cargo check` / `npm test` / `pnpm test` — but the allow-list in
+# `services/shell.rs` already blocks arbitrary destructive commands.
+#
+# The `dispatch_subagent` tool lets Lucifer fan out to read-only
+# sub-agents (typically `raziel` for context / `azazel` for UI checks).
+# Sub-agents are still constrained to their own `allowed_tools`.
+allowed_tools = [
+  # ---- Workspace — read (3) ----
+  "read_file",
+  "list_dir",
+  "search_workspace",
+  # ---- Workspace — mutate (2) ----
+  "create_file",
+  "edit_file",
+  # ---- Shell (1) — used for build/test/install. Allow-list applies. ----
+  "run_command",
+  # ---- Git (6) — typed wrappers, safety-bounded ----
+  "git_status",
+  "git_diff",
+  "git_log",
+  "git_blame",
+  "git_stage",
+  "git_commit",
+  # ---- Web / research (2) ----
+  "web_search",
+  "fetch_url",
+  # ---- Recursive sub-agent (1) — read-only M2.7 sub-agents ----
+  "dispatch_subagent",
+]
+
+# Heal loops are longer than the read-only code-analysis default (30).
+# A typical "cargo check failed with 5 errors" run needs ~10-20
+# tool-use cycles. 60 gives us headroom for a couple of
+# check-edit-check iterations before we hit the cap.
+max_steps        = 60
+# Sub-agents are expensive (each one is a full M2.7 round-trip).
+# Keep this small — 3 is enough for "fetch context from Raziel,
+# look at git log, dispatch a focused investigation".
+max_subagents    = 3
+# 2M tokens is roughly $X at M3 pricing (see services/agent/cost.rs).
+# For a "fix everything that's red" auto-trigger at 30-min cron,
+# we don't want one run to drain the budget. 2M = ~4-8 full heal cycles
+# of typical project size, which is a sane bound.
+max_cost_tokens  = 2_000_000
+
+# Default triggers (informational; the actual firing is wired in
+# lib.rs::setup). v1 fires all three: manual button, on-build-fail
+# hook, and a 30-min cron poll.
+[[default_triggers]]
+kind = "manual"
+
+[[default_triggers]]
+kind = "on_build_fail"
+
+[[default_triggers]]
+kind = "cron"
+schedule = "*/30 * * * *"
