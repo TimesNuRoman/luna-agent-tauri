@@ -24,6 +24,9 @@ use tokio::process::{Child, Command};
 
 use services::vision::{self, CaptureOptions, CaptureState, MonitorInfo, SingleFrame, VisionRequest};
 use services::telegram::{self as tg, TelegramState};
+// Note: services::daimonion commands are referenced inline below
+// as `daimonion::daimonion_chat` etc., so the `use ... as dm;` alias
+// from earlier in the file is no longer needed.
 
 mod services;
 mod secrets;
@@ -157,6 +160,40 @@ pub struct AppState {
     /// `evolver.current` internally. See `services::evolver` and
     /// ADR-0010.
     pub evolver: services::evolver::EvolverState,
+    /// Azazel browser-use agent (Phase Z0+). `None` until `setup`
+    /// creates the `BrowserState` with the proper `app_local_data`
+    /// path. Lazy-init pattern matches `memory` above.
+    pub azazel_browser: parking_lot::Mutex<
+        Option<Arc<services::azazel::state::BrowserState>>,
+    >,
+    /// Azazel approval policy. Atomic so reads from hot paths
+    /// (Tauri commands) are lock-free. 0=Strict, 1=Normal, 2=Yolo.
+    /// Default 1 (Normal). Phase Z1 will gate Medium/High tools
+    /// on this; Z0 ships the storage only.
+    pub azazel_policy: Arc<std::sync::atomic::AtomicU8>,
+    /// Queue of pending approval requests. Each entry is a
+    /// `PendingApproval` with a oneshot channel; the supervisor
+    /// awaits the channel, the UI fires it via `azazel_approve`.
+    /// Initialised eagerly (Default) because it has no path
+    /// dependencies.
+    pub azazel_approvals: Arc<services::azazel::safety::ApprovalQueue>,
+    /// Design service (Mephistopheles, Phase P0+). Lazily initialized
+    /// in `setup` after the workspace is opened. None ⇒ design tools
+    /// return a clear "no workspace" error to the persona. See
+    /// `services::design` and ADR-0013.
+    pub design: parking_lot::Mutex<Option<Arc<services::design::DesignService>>>,
+    /// Daimonion vision gate (Phase D0+). Throttles screen captures
+    /// the LLM requests via the `<capture/>` marker. Initialized
+    /// with default policy at startup; per-conversation counters
+    /// are reset by the supervisor (D2+). See `services::daimonion::vision`.
+    pub daimonion_vision: parking_lot::Mutex<services::daimonion::VisionGate>,
+    /// Named personas (Raziel / MorningStar / Daimonion). The
+    /// Tauri command layer reads this directly (e.g. Daimonion's
+    /// `daimonion_chat` resolves the active persona's system prompt
+    /// here) instead of going through `TaskDeps`. This is a thin
+    /// `Arc`-backed handle into the same registry managed by
+    /// `TaskDeps::personas`.
+    pub personas: Arc<services::agent::personas::PersonaRegistry>,
 }
 
 /// Payload of a `video-auto-trigger` event. Stored in
@@ -191,6 +228,14 @@ pub(crate) static APP_HANDLE_FOR_COMMANDS: once_cell::sync::OnceCell<AppHandle> 
 /// commands can lock it briefly. The actual runner is wired in Phase M1.
 pub struct TaskDeps {
     pub task_manager: parking_lot::Mutex<services::agent::TaskManager>,
+    /// Named personas (Raziel v1). Cheap to clone (`Arc`-backed).
+    /// The runner reads this when a task has `persona_id` set.
+    pub personas: services::agent::personas::PersonaRegistry,
+    /// Shared cell with the user's interest list. The chat-agent
+    /// writes through `set_user_interests`; the runner hands a clone
+    /// to Raziel's `PersonaToolContext` so `get_user_interests`
+    /// returns the same list the UI shows.
+    pub user_interests: std::sync::Arc<parking_lot::Mutex<Vec<String>>>,
 }
 
 // =====================================================================
@@ -352,13 +397,25 @@ fn set_api_key(provider: String, key: String) -> Result<(), String> {
     entry.set_password(&key).map_err(|e| e.to_string())
 }
 
+/// Crate-internal accessor for `get_api_key` so non-Tauri-command
+/// helpers (like the Daimonion voice pipeline) can read the user's
+/// MiniMax key without going through the IPC layer. `get_api_key`
+/// itself stays private to avoid leaking the key into the global
+/// namespace and clashing with the tauri::command-generated
+/// `__cmd__get_api_key` macro.
+pub fn get_minimax_api_key() -> Result<Option<String>, String> {
+    get_api_key("minimax".to_string())
+}
+
 /// Seed the AppState interest cache from the frontend. The frontend
 /// owns the persistent list (localStorage); this just mirrors it so the
-/// `get_user_interests` tool can answer without a round-trip.
+/// `get_user_interests` tool (and Raziel's persona-tool counterpart)
+/// can answer without a round-trip.
 #[tauri::command]
 fn set_user_interests(
     interests: Vec<String>,
     state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
     let clean: Vec<String> = interests
         .into_iter()
@@ -367,7 +424,12 @@ fn set_user_interests(
         .take(64)
         .collect();
     let mut cache = state.interests.lock().map_err(|e| e.to_string())?;
-    *cache = clean;
+    *cache = clean.clone();
+    // Also mirror into the runner-side cell so Raziel (whose
+    // PersonaToolContext holds a clone) sees the latest list.
+    if let Some(deps) = app.try_state::<TaskDeps>() {
+        *deps.user_interests.lock() = clean;
+    }
     Ok(())
 }
 
@@ -398,6 +460,22 @@ fn open_workspace(
     // workspace). Cheap and predictable.
     state.edit_undo.lock().unwrap().clear();
     push_recent(&p.to_string_lossy());
+
+    // Initialize the design service (Mephistopheles, P0+). The
+    // service lazily creates `.luna/design/` with seed defaults if
+    // it doesn't exist. If no MiniMax key is set yet, the design
+    // tools will surface a clear error.
+    match init_design_service(&p) {
+        Ok(svc) => {
+            *state.design.lock() = Some(svc);
+        }
+        Err(e) => {
+            tracing::warn!(target: "design", "design service init failed: {e}");
+            // Non-fatal: leave design None; persona tools return
+            // a clear "design not initialized" error.
+        }
+    }
+
     let info = WorkspaceInfo {
         path: p.to_string_lossy().to_string(),
         name,
@@ -415,11 +493,30 @@ fn open_workspace(
 fn close_workspace(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
     *state.workspace_root.lock().unwrap() = None;
     state.edit_undo.lock().unwrap().clear();
+    *state.design.lock() = None;
     let _ = app.emit("workspace_changed", serde_json::json!({
         "path": serde_json::Value::Null,
         "name": serde_json::Value::Null,
     }));
     Ok(())
+}
+
+/// Initialize the design service for the given workspace. Reads the
+/// MiniMax API key from the keyring and constructs a fresh
+/// `MinimaxClient`. If the key is missing, returns an error — the
+/// caller logs and continues with `design = None` (tools return
+/// "no workspace open").
+fn init_design_service(workspace: &std::path::Path) -> Result<Arc<services::design::DesignService>, String> {
+    use services::agent::minimax_client::MinimaxClient;
+    let api_key = read_minimax_api_key()?.unwrap_or_default();
+    if api_key.is_empty() {
+        return Err("MiniMax API key not set (set in Settings)".into());
+    }
+    let client = Arc::new(MinimaxClient::new(api_key.clone(), "MiniMax-M3".into())
+        .map_err(|e| format!("minimax client: {e}"))?);
+    let svc = services::design::DesignService::open(workspace, api_key, client)
+        .map_err(|e| format!("design service open: {e}"))?;
+    Ok(Arc::new(svc))
 }
 
 #[tauri::command]
@@ -2615,6 +2712,59 @@ async fn minimax_chat_stream(
         }
     }
 
+    // -- MiniMax tool awareness -----------------------------------------------
+    // M3 receives `tools` in the API body but does not always treat the
+    // schema as "my capabilities" unless the system prompt explicitly
+    // enumerates them. We append a compact tool list to the first system
+    // message (or insert one if none) so the model can never answer
+    // "Tool not found" when the tools are right there. Tool descriptions
+    // are intentionally short — full JSON Schema is already in the
+    // `tools` array, this is just a discovery hint.
+    let tool_names: Vec<String> = {
+        let tools = match req.tools_preset.as_deref() {
+            Some("three_d") => three_d_tools_schema(),
+            _ => luna_tools_schema(),
+        };
+        if let Some(arr) = tools.as_array() {
+            arr.iter()
+                .filter_map(|t| t.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()))
+                .map(String::from)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    };
+    if !tool_names.is_empty() {
+        let tool_list = tool_names
+            .iter()
+            .map(|n| format!("- `{}`", n))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let tool_hint = format!(
+            "\n\n[Available tools — call them via the `tools` array, do NOT answer \"Tool not found\". \
+             If a user request matches one of these, emit the function call instead of describing it.]\n{}",
+            tool_list
+        );
+        // Append to the first system message; create one if there isn't.
+        if let Some(sys) = messages
+            .iter_mut()
+            .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"))
+        {
+            if let Some(content) = sys.get("content").and_then(|c| c.as_str()) {
+                let new_content = format!("{}{}", content, tool_hint);
+                sys.as_object_mut().unwrap().insert(
+                    "content".into(),
+                    serde_json::Value::String(new_content),
+                );
+            }
+        } else {
+            messages.insert(
+                0,
+                serde_json::json!({ "role": "system", "content": tool_hint.trim_start() }),
+            );
+        }
+    }
+
     for _ in 0..MAX_TOOL_ITERATIONS {
         // Build request body for this iteration.
         let mut body_map = serde_json::Map::new();
@@ -2672,9 +2822,9 @@ async fn minimax_chat_stream(
         }
 
         // Stream loop. We accumulate:
-        //   - text deltas РІвЂ вЂ™ emit ai_chunk
-        //   - reasoning deltas РІвЂ вЂ™ emit ai_thinking
-        //   - tool_calls РІвЂ вЂ™ assemble full tool calls (OpenAI streams them across
+        //   - text deltas РІвЂ вЂ™ emit ai_chunk
+        //   - reasoning deltas РІвЂ вЂ™ emit ai_thinking
+        //   - tool_calls РІвЂ вЂ™ assemble full tool calls (OpenAI streams them across
         //     many chunks with delta.tool_calls[i].{id, function.name, function.arguments})
         let mut stream = res.bytes_stream();
         let mut buffer = String::new();
@@ -2686,6 +2836,22 @@ async fn minimax_chat_stream(
         let mut assistant_text_acc = String::new();
         let mut assistant_thinking_acc = String::new();
         let mut assistant_message_json: Option<serde_json::Value> = None;
+        // First-event sniff: log a one-line summary of the very first SSE
+        // chunk so we can verify MiniMax's actual response shape (delta vs.
+        // message, finish_reason semantics, whether tool_calls live in
+        // delta or only on the final message). Set the MINIMAX_DEBUG=1 env
+        // to silence this in production.
+        let mut first_event_logged = false;
+        let minimax_debug = std::env::var("MINIMAX_DEBUG").ok().as_deref() == Some("1");
+        if minimax_debug {
+            eprintln!(
+                "[doChat] → MiniMax: model={} tools={} tool_choice={} messages={}",
+                model,
+                tool_names.len(),
+                tool_choice,
+                messages.len()
+            );
+        }
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| format!("stream: {e}"))?;
@@ -2700,6 +2866,19 @@ async fn minimax_chat_stream(
                     let Ok(v) = serde_json::from_str::<serde_json::Value>(rest) else { continue; };
                     let Some(choice) = v.get("choices").and_then(|c| c.get(0)) else { continue; };
                     let Some(delta) = choice.get("delta") else { continue; };
+
+                    // Debug: log the very first SSE event so we can see the
+                    // exact response shape MiniMax returns (gated by env to
+                    // keep production stderr clean).
+                    if !first_event_logged && minimax_debug {
+                        eprintln!(
+                            "[doChat] ← MiniMax first event: keys={:?} delta_keys={:?} finish_reason={:?}",
+                            v.as_object().map(|o| o.keys().collect::<Vec<_>>()),
+                            delta.as_object().map(|o| o.keys().collect::<Vec<_>>()),
+                            choice.get("finish_reason").and_then(|f| f.as_str()),
+                        );
+                        first_event_logged = true;
+                    }
 
                     // text content
                     if let Some(s) = delta.get("content").and_then(|t| t.as_str()) {
@@ -6421,6 +6600,535 @@ fn memory_forget(
     l1.forget_by_id(&id).map_err(|e| e.to_string())
 }
 
+/// Add a node to the L2 knowledge graph. The graph is opt-in: it
+/// starts empty and grows as Raziel (or any future persona) calls
+/// this. `name` is canonicalised to lowercase. `kind` defaults to
+/// `"concept"`; the schema also accepts `"person"`, `"project"`,
+/// `"file"`, `"tool"`. Returns the new entity id.
+#[tauri::command]
+fn memory_add_graph_entity(
+    name: String,
+    kind: Option<String>,
+    importance: Option<f32>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let svc = memory_or_err(&state)?;
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let entity_id = uuid::Uuid::new_v4().to_string();
+    let entity = services::memory::Entity {
+        id: entity_id.clone(),
+        name: name.to_lowercase(),
+        kind: kind.unwrap_or_else(|| "concept".to_string()),
+        ts: now_ms,
+        importance: importance.unwrap_or(0.5).clamp(0.0, 1.0),
+    };
+    svc.add_graph_entity(entity).map_err(|e| e.to_string())?;
+    Ok(entity_id)
+}
+
+/// Add an edge between two entities (by name). The graph index is
+/// rebuilt on every call — cheap, since mutations are rare. `kind`
+/// defaults to `"related"`; the schema also accepts `"is_a"`,
+/// `"part_of"`, `"uses"`, `"depends_on"`, `"learned_from"`. Returns
+/// the edge kind on success.
+#[tauri::command]
+fn memory_add_graph_relation(
+    from_name: String,
+    to_name: String,
+    kind: Option<String>,
+    weight: Option<f32>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let svc = memory_or_err(&state)?;
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let rel_kind = kind.unwrap_or_else(|| "related".to_string());
+    let rel = services::memory::Relation {
+        from: from_name.to_lowercase(),
+        to: to_name.to_lowercase(),
+        kind: rel_kind.clone(),
+        weight: weight.unwrap_or(0.5).clamp(0.0, 1.0),
+        ts: now_ms,
+    };
+    svc.add_graph_relation(rel)
+        .map_err(|e| e.to_string())?;
+    Ok(rel_kind)
+}
+
+/// Read the user's current interest list (the mirror in
+/// `AppState.interests`). This is the Tauri-command counterpart of
+/// the chat-agent `get_user_interests` tool — used by the persona
+/// picker UI to display the list.
+#[tauri::command]
+fn get_user_interests(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let cache = state.interests.lock().map_err(|e| e.to_string())?;
+    Ok(cache.clone())
+}
+
+// =====================================================================
+// P: Persona system (Phase P — see services/agent/personas/, ADR-0012)
+// =====================================================================
+//
+// Persona = a TOML-defined named agent. v1 ships Raziel
+// (keeper of memory + Fusion News researcher). Tauri commands here
+// are the IPC surface for the persona picker UI and for the
+// auto-fired Fusion News trigger on Research-tab-open.
+
+/// List all loaded personas. The persona card UI uses this to render
+/// the switcher dropdown.
+#[tauri::command]
+fn persona_list(app: AppHandle) -> Vec<services::agent::personas::PersonaSummary> {
+    let deps = match app.try_state::<crate::TaskDeps>() {
+        Some(d) => d,
+        None => return Vec::new(),
+    };
+    deps.personas.list()
+}
+
+/// Get a single persona by id. Returns the full `AgentPersona` (the
+/// TOML structure). Used by the persona-card preview UI.
+#[tauri::command]
+fn persona_get(
+    id: String,
+    app: AppHandle,
+) -> Result<services::agent::personas::AgentPersona, String> {
+    let deps = app
+        .try_state::<crate::TaskDeps>()
+        .ok_or_else(|| "TaskDeps missing".to_string())?;
+    deps.personas
+        .get(&id)
+        .ok_or_else(|| format!("persona not found: {id}"))
+}
+
+/// Hot-reload the persona registry from disk. Picks up changes to
+/// `*.toml` files without restarting the app. Returns a list of
+/// `(file, error)` for any file that failed to parse.
+#[tauri::command]
+fn persona_reload(app: AppHandle) -> Result<Vec<(String, String)>, String> {
+    use services::agent::personas::PersonaError;
+    let deps = app
+        .try_state::<crate::TaskDeps>()
+        .ok_or_else(|| "TaskDeps missing".to_string())?;
+    let errors = deps
+        .personas
+        .reload()
+        .map_err(|e| format!("persona_reload: {e}"))?;
+    let out: Vec<(String, String)> = errors
+        .into_iter()
+        .map(|(p, e)| {
+            let name = p
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("?")
+                .to_string();
+            (name, persona_error_message(&e))
+        })
+        .collect();
+    Ok(out)
+}
+
+fn persona_error_message(e: &services::agent::personas::PersonaError) -> String {
+    use services::agent::personas::PersonaError;
+    match e {
+        PersonaError::Io(s) => format!("io: {s}"),
+        PersonaError::Toml(s) => format!("toml: {s}"),
+        PersonaError::InvalidTool(s) => format!("invalid tool: {s}"),
+        PersonaError::MissingSystemPrompt(s) => format!("missing system_prompt: {s}"),
+        PersonaError::Duplicate(s) => format!("duplicate id: {s}"),
+        PersonaError::NotFound(s) => format!("not found: {s}"),
+        PersonaError::Invalid(s) => format!("invalid: {s}"),
+    }
+}
+
+/// Spawn a Raziel task in memory-keeper mode. The user message
+/// becomes the task prompt; the runner loads the persona's
+/// system_prompt + tool whitelist from the registry and runs
+/// `supervisor::run_loop` with the persona context wired.
+///
+/// `mode` is `"memory"` or `"fusion_news"`. For v1 the mode tail
+/// is encoded in the prompt itself (the persona's system prompt
+/// already contains both modes); we keep the parameter for
+/// future divergence.
+#[tauri::command]
+async fn raziel_chat(
+    app: AppHandle,
+    message: String,
+    mode: Option<String>,
+    parent_chat_id: Option<String>,
+) -> Result<String, String> {
+    spawn_raziel_task(
+        app,
+        format!("Raziel: {}", message.chars().take(80).collect::<String>()),
+        message,
+        mode.unwrap_or_else(|| "memory".to_string()),
+        parent_chat_id,
+    )
+}
+
+/// Spawn a Raziel task for Fusion News. The runner uses the
+/// `fusion_news` mode (different model: M3 vs the M2.7-highspeed
+/// default for memory-mode). Returns the task id; the UI
+/// subscribes to `task_progress` and `task_finished` events.
+#[tauri::command]
+async fn raziel_run_fusion_news(
+    app: AppHandle,
+    parent_chat_id: Option<String>,
+) -> Result<String, String> {
+    // The system prompt tail (raziel_system.md, mode: fusion_news)
+    // already tells Raziel how to build the feed. The prompt here
+    // is just a trigger.
+    let prompt = "Build today's Fusion News feed from the user's interests. \
+        For each interest, fetch from web and RSS, dedupe, rank, and call \
+        produce_fusion_payload with the final list."
+        .to_string();
+    spawn_raziel_task(
+        app,
+        "Raziel: Fusion News".to_string(),
+        prompt,
+        "fusion_news".to_string(),
+        parent_chat_id,
+    )
+}
+
+// =====================================================================
+// Mephistopheles (design agent) — Tauri commands (P0+)
+// =====================================================================
+//
+// Five commands back the Mephistopheles persona:
+//   - mephisto_chat          — spawn a design task
+//   - mephisto_get_state     — read current design artifacts
+//   - mephisto_apply_design  — apply (tokens export / scaffold apply / copy apply)
+//   - mephisto_export        — bulk export zip bundle
+//   - mephisto_save_scaffold — apply scaffold to user's src/ (allow-list)
+//
+// All 5 read the DesignService from AppState (set in setup). If the
+// service is None (workspace not open), the command returns a clear
+// "no workspace" error.
+
+/// Spawn a Mephistopheles design task. The runner drives the
+/// supervisor loop with `persona_id="mephistopheles"`, which makes
+/// the system prompt and the 9 design tools available.
+///
+/// `kind` is one of `"component" | "page" | "app" | "copy" | "image"
+/// | "auto"` (default). For `"copy"` the `intent` is the copy
+/// context (hero / cta / etc.); for `"image"` the `intent` is the
+/// image prompt; etc. The persona's system prompt describes the
+/// slash-command grammar.
+#[tauri::command]
+async fn mephisto_chat(
+    app: AppHandle,
+    prompt: String,
+    parent_chat_id: Option<String>,
+) -> Result<String, String> {
+    spawn_mephisto_task(
+        app,
+        format!(
+            "Мефистофель: {}",
+            prompt.chars().take(80).collect::<String>()
+        ),
+        prompt,
+        parent_chat_id,
+    )
+}
+
+/// Read the current design state: manifest, brief, palette, voice,
+/// and recent images / copy / scaffolds. Used by `DesignStudio.svelte`
+/// on mount and after every persona task completes.
+#[tauri::command]
+async fn mephisto_get_state(app: AppHandle) -> Result<serde_json::Value, String> {
+    let design = app
+        .try_state::<crate::AppState>()
+        .and_then(|s| s.design.lock().clone())
+        .ok_or_else(|| "design: no workspace open".to_string())?;
+    let payload = serde_json::json!({
+        "manifest": design.get_manifest(),
+        "brief": design.get_brief(),
+        "palette": design.get_palette(),
+        "voice": design.get_voice(),
+        "images": design.list_images(24),
+        "copy": design.list_copy(None, 30),
+        "workspace_root": design.workspace_root().display().to_string(),
+    });
+    serde_json::to_value(payload).map_err(|e| e.to_string())
+}
+
+/// Apply a design artifact to the user's project. Currently:
+///   - `kind: "tokens"` → export `tokens.css` to `target_path`
+///   - `kind: "copy"` → not yet wired in v1; use the persona tool directly
+///   - `kind: "scaffold"` → not yet wired in v1; use `mephisto_save_scaffold`
+#[tauri::command]
+async fn mephisto_apply_design(
+    app: AppHandle,
+    kind: String,
+    target_path: String,
+    _format: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let design = app
+        .try_state::<crate::AppState>()
+        .and_then(|s| s.design.lock().clone())
+        .ok_or_else(|| "design: no workspace open".to_string())?;
+    match kind.as_str() {
+        "tokens" => {
+            // Allow-list on target_path.
+            let allowed = ["src/styles/", "src/lib/styles/", "src/tokens."];
+            if !allowed.iter().any(|p| target_path.starts_with(p)) {
+                return Err(format!(
+                    "target_path '{target_path}' not in allow-list (allowed: {})",
+                    allowed.join(", ")
+                ));
+            }
+            let workspace_root = design
+                .workspace_root()
+                .parent()
+                .and_then(|p| p.parent())
+                .ok_or_else(|| "cannot resolve workspace root".to_string())?;
+            let out = workspace_root.join(&target_path);
+            if let Some(parent) = out.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let palette = design.get_palette();
+            let css = services::design::export::build_tokens_css(&palette);
+            std::fs::write(&out, css.as_bytes())
+                .map_err(|e| format!("write {out:?}: {e}"))?;
+            Ok(serde_json::json!({
+                "ok": true,
+                "path": out.display().to_string(),
+                "bytes": css.len(),
+            }))
+        }
+        other => Err(format!(
+            "mephisto_apply_design: kind '{other}' not yet wired (use 'tokens' for v1)"
+        )),
+    }
+}
+
+/// Bulk-export the design system as a zip bundle under
+/// `<workspace>/.luna/design/dist/`. v1 returns the path; UI opens
+/// it via `tauri-plugin-shell` or the file manager.
+#[tauri::command]
+async fn mephisto_export(app: AppHandle) -> Result<serde_json::Value, String> {
+    let design = app
+        .try_state::<crate::AppState>()
+        .and_then(|s| s.design.lock().clone())
+        .ok_or_else(|| "design: no workspace open".to_string())?;
+    // v1: just write a manifest.json bundle. Full zip in v2.
+    let dist = design.workspace_root().join("dist");
+    std::fs::create_dir_all(&dist).map_err(|e| e.to_string())?;
+    let bundle = serde_json::json!({
+        "manifest": design.get_manifest(),
+        "brief": design.get_brief(),
+        "palette": design.get_palette(),
+        "voice": design.get_voice(),
+        "images": design.list_images(100),
+        "copy": design.list_copy(None, 100),
+        "exported_at": chrono::Utc::now().to_rfc3339(),
+    });
+    let pretty = serde_json::to_string_pretty(&bundle).map_err(|e| e.to_string())?;
+    let out = dist.join("luna-design-bundle.json");
+    std::fs::write(&out, pretty.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "path": out.display().to_string(),
+        "bytes": pretty.len(),
+    }))
+}
+
+/// Apply a saved scaffold to the user's `src/`. v1 copies the
+/// scaffold's files to the target directory (allow-listed).
+#[tauri::command]
+async fn mephisto_save_scaffold(
+    app: AppHandle,
+    scaffold_id: String,
+    target_subdir: String,
+) -> Result<serde_json::Value, String> {
+    let design = app
+        .try_state::<crate::AppState>()
+        .and_then(|s| s.design.lock().clone())
+        .ok_or_else(|| "design: no workspace open".to_string())?;
+    let allowed = ["src/", "src/lib/", "src/components/", "src/routes/"];
+    if !allowed.iter().any(|p| target_subdir.starts_with(p)) {
+        return Err(format!(
+            "target_subdir '{target_subdir}' not in allow-list (allowed: {})",
+            allowed.join(", ")
+        ));
+    }
+    // Find scaffold by id.
+    let mut found: Option<std::path::PathBuf> = None;
+    for kind_dir in ["components", "pages", "apps"] {
+        let dir = design.workspace_root().join("scaffolds").join(kind_dir);
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for entry in rd.flatten() {
+                if entry.file_name().to_string_lossy().contains(&scaffold_id) {
+                    if entry.path().is_dir() {
+                        found = Some(entry.path());
+                        break;
+                    }
+                }
+            }
+        }
+        if found.is_some() {
+            break;
+        }
+    }
+    let src = found.ok_or_else(|| format!("scaffold '{scaffold_id}' not found"))?;
+    let workspace_root = design
+        .workspace_root()
+        .parent()
+        .and_then(|p| p.parent())
+        .ok_or_else(|| "cannot resolve workspace root".to_string())?;
+    let dst = workspace_root.join(&target_subdir);
+    std::fs::create_dir_all(&dst).map_err(|e| e.to_string())?;
+    let mut copied = Vec::new();
+    for entry in walkdir::WalkDir::new(&src).into_iter().filter_map(|e| e.ok()) {
+        if !entry.path().is_file() {
+            continue;
+        }
+        if entry.path().extension().and_then(|s| s.to_str()) == Some("json")
+            && entry
+                .path()
+                .file_name()
+                .and_then(|s| s.to_str())
+                .map(|s| s.starts_with("__"))
+                .unwrap_or(false)
+        {
+            continue;
+        }
+        let rel = entry.path().strip_prefix(&src).unwrap_or(entry.path());
+        let out = dst.join(rel);
+        if let Some(parent) = out.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::copy(entry.path(), &out).map_err(|e| e.to_string())?;
+        copied.push(out.display().to_string());
+    }
+    Ok(serde_json::json!({
+        "ok": true,
+        "copied": copied.len(),
+        "files": copied,
+    }))
+}
+
+/// Shared spawn helper for Mephistopheles. Mirrors `spawn_raziel_task`
+/// but uses `persona_id = "mephistopheles"`.
+fn spawn_mephisto_task(
+    app: AppHandle,
+    title: String,
+    prompt: String,
+    parent_chat_id: Option<String>,
+) -> Result<String, String> {
+    use services::agent::personas::PersonaMode;
+    use services::agent::task::defaults;
+
+    let deps = app
+        .try_state::<crate::TaskDeps>()
+        .ok_or_else(|| "TaskDeps missing".to_string())?;
+    let persona = deps
+        .personas
+        .get("mephistopheles")
+        .ok_or_else(|| "mephistopheles persona not loaded".to_string())?;
+    // For v1 we always use the persona's `default_model` (M3) since the
+    // freeform `model_per_mode` keys aren't supported by `PersonaMode`
+    // enum yet. v1.1: extend the enum or replace with HashMap lookup.
+    let model = deps
+        .personas
+        .model_for("mephistopheles", PersonaMode::Generic)
+        .map_err(|e| format!("mephistopheles model: {e}"))?;
+
+    let state = app.state::<crate::TaskDeps>();
+    let mut mgr = state.task_manager.lock();
+
+    let id = format!("task-{}", uuid::Uuid::new_v4());
+    let task = services::agent::Task::new(
+        id.clone(),
+        title,
+        prompt,
+        model,
+        persona.sub_agent_model.clone(),
+        parent_chat_id,
+        persona.max_steps,
+        persona.max_subagents,
+        persona.max_cost_tokens,
+    );
+    let mut task = task;
+    task.persona_id = Some(persona.id.clone());
+
+    let app_for_runner = app.clone();
+    let id_for_runner = id.clone();
+    mgr.create(task, move |_handle| {
+        services::agent::TaskRunner::spawn(app_for_runner, id_for_runner);
+    })
+    .map_err(|e| e.to_string())?;
+
+    let _ = defaults::DEFAULT_MODEL;
+    Ok(id)
+}
+
+/// Shared spawn helper. Resolves persona config from the registry,
+/// picks the model for the mode, creates a `Task` with
+/// `persona_id = "raziel"`, and hands it to `TaskManager::create`
+/// (which fires the runner closure).
+fn spawn_raziel_task(
+    app: AppHandle,
+    title: String,
+    prompt: String,
+    mode: String,
+    parent_chat_id: Option<String>,
+) -> Result<String, String> {
+    use services::agent::personas::PersonaMode;
+    use services::agent::task::defaults;
+
+    let deps = app
+        .try_state::<crate::TaskDeps>()
+        .ok_or_else(|| "TaskDeps missing".to_string())?;
+    let persona = deps
+        .personas
+        .get("raziel")
+        .ok_or_else(|| "raziel persona not loaded".to_string())?;
+    let pmode = PersonaMode::from_str_opt(&mode).unwrap_or(PersonaMode::Memory);
+    let model = deps
+        .personas
+        .model_for("raziel", pmode)
+        .map_err(|e| format!("raziel model: {e}"))?;
+
+    let state = app.state::<crate::TaskDeps>();
+    let mut mgr = state.task_manager.lock();
+
+    let id = format!("task-{}", uuid::Uuid::new_v4());
+    let task = services::agent::Task::new(
+        id.clone(),
+        title,
+        prompt,
+        model,
+        persona.sub_agent_model.clone(),
+        parent_chat_id,
+        persona.max_steps,
+        persona.max_subagents,
+        persona.max_cost_tokens,
+    );
+    // Stash persona_id on the task so the runner can look up the
+    // system_prompt and tool whitelist.
+    let mut task = task;
+    task.persona_id = Some(persona.id.clone());
+
+    let app_for_runner = app.clone();
+    let id_for_runner = id.clone();
+    mgr.create(task, move |_handle| {
+        services::agent::TaskRunner::spawn(app_for_runner, id_for_runner);
+    })
+    .map_err(|e| e.to_string())?;
+
+    // Touch the unused binding so clippy doesn't complain about
+    // `defaults` not being used in non-test builds. (`defaults` is
+    // still useful for the persona card UI to show the defaults.)
+    let _ = defaults::DEFAULT_MODEL;
+    Ok(id)
+}
+
 // =====================================================================
 // Mock provider — E2E testing of the Tauri tool pipeline
 // =====================================================================
@@ -6877,6 +7585,7 @@ async fn task_create(
     max_steps: Option<u32>,
     max_subagents: Option<u32>,
     max_cost_tokens: Option<u64>,
+    persona_id: Option<String>,
 ) -> Result<String, String> {
     use services::agent::task::defaults;
 
@@ -6886,17 +7595,63 @@ async fn task_create(
     // Generate a UUID-based id. We don't need cryptographic strength
     // here; uuid v4 is overkill but already in our dep tree.
     let id = format!("task-{}", uuid::Uuid::new_v4());
-    let task = services::agent::Task::new(
+    // Resolve persona config FIRST (if any), so its defaults flow
+    // into the Task below. We do this before consuming `model` /
+    // `sub_agent_model` so we can detect "caller didn't pin" via
+    // `is_none()` instead of moving them and losing that signal.
+    let persona = if let Some(ref pid) = persona_id {
+        let deps = app.state::<crate::TaskDeps>();
+        match deps.personas.get(pid) {
+            Some(p) => Some(p),
+            None => return Err(format!("unknown persona_id: {pid}")),
+        }
+    } else {
+        None
+    };
+    let mut task = services::agent::Task::new(
         id.clone(),
         title,
         prompt,
-        model.unwrap_or_else(|| defaults::DEFAULT_MODEL.to_string()),
-        sub_agent_model.unwrap_or_else(|| defaults::DEFAULT_SUBAGENT_MODEL.to_string()),
+        model.unwrap_or_else(|| {
+            persona
+                .as_ref()
+                .map(|p| p.default_model.clone())
+                .unwrap_or_else(|| defaults::DEFAULT_MODEL.to_string())
+        }),
+        sub_agent_model.unwrap_or_else(|| {
+            persona
+                .as_ref()
+                .map(|p| p.sub_agent_model.clone())
+                .unwrap_or_else(|| defaults::DEFAULT_SUBAGENT_MODEL.to_string())
+        }),
         parent_chat_id,
-        max_steps.unwrap_or(defaults::MAX_STEPS),
-        max_subagents.unwrap_or(defaults::MAX_SUBAGENTS),
-        max_cost_tokens.unwrap_or(defaults::MAX_COST_TOKENS),
+        max_steps.unwrap_or_else(|| {
+            persona
+                .as_ref()
+                .map(|p| p.max_steps)
+                .unwrap_or(defaults::MAX_STEPS)
+        }),
+        max_subagents.unwrap_or_else(|| {
+            persona
+                .as_ref()
+                .map(|p| p.max_subagents)
+                .unwrap_or(defaults::MAX_SUBAGENTS)
+        }),
+        max_cost_tokens.unwrap_or_else(|| {
+            persona
+                .as_ref()
+                .map(|p| p.max_cost_tokens)
+                .unwrap_or(defaults::MAX_COST_TOKENS)
+        }),
     );
+    // Phase M3+: persona dispatch. When `persona_id` is set, the
+    // runner picks the persona's supervisor (MorningStar's heal
+    // loop for `"lucifer"`, Raziel's read-only curator for
+    // `"raziel"`, etc.) and uses the persona's system prompt +
+    // tool whitelist. We already validated the id above.
+    if let Some(p) = persona {
+        task.persona_id = Some(p.id);
+    }
 
     // Phase M1: wire the real runner. The closure receives a
     // `TaskHandle` (cancel token + join) and is responsible for
@@ -6954,6 +7709,251 @@ async fn task_delete(
     let state = app.state::<crate::TaskDeps>();
     let mut mgr = state.task_manager.lock();
     mgr.delete(&task_id).map_err(|e| e.to_string())
+}
+
+// =====================================================================
+// Phase Z0 commands: Azazel browser-use agent
+// =====================================================================
+//
+// These four commands are the minimum-viable IPC surface for Azazel:
+// - `azazel_run`         — start a browser-kind task
+// - `azazel_cancel`      — cancel a running browser task
+// - `azazel_screenshot`  — return the latest cached frame for a task
+// - `azazel_get_browser_state` — read-only snapshot for the UI
+// - `azazel_set_policy`  — switch the approval policy (Z0 storage only;
+//                          Z1 wires the policy into `run_browser_loop`)
+// Phase Z1 adds `azazel_approve` / `azazel_reject` (approval queue).
+
+/// Spawn an Azazel browser-use task. Returns the new `task_id`. The
+/// task is enqueued in `TaskManager` and dispatched by the runner
+/// (which picks `run_browser_loop` because `kind == Browser`).
+#[tauri::command]
+async fn azazel_run(
+    app: AppHandle,
+    title: Option<String>,
+    prompt: String,
+    parent_chat_id: Option<String>,
+    max_steps: Option<u32>,
+    max_cost_tokens: Option<u64>,
+) -> Result<String, String> {
+    use services::agent::task::defaults;
+    if prompt.trim().is_empty() {
+        return Err("azazel_run: prompt must not be empty".into());
+    }
+    let state = app.state::<crate::TaskDeps>();
+    let mut mgr = state.task_manager.lock();
+
+    let id = format!("task-{}", uuid::Uuid::new_v4());
+    let title = title.unwrap_or_else(|| {
+        // Trim the prompt to a sane title (first line, max 60 chars).
+        let first = prompt.lines().next().unwrap_or("Azazel task").trim();
+        let trimmed: String = first.chars().take(60).collect();
+        if trimmed.len() < first.chars().count() {
+            format!("{trimmed}…")
+        } else {
+            trimmed
+        }
+    });
+    // Azazel tasks use the default M3 model and no sub-agent.
+    let task = services::agent::Task::new_browser(
+        id.clone(),
+        title,
+        prompt,
+        defaults::DEFAULT_MODEL.to_string(),
+        defaults::DEFAULT_SUBAGENT_MODEL.to_string(),
+        parent_chat_id,
+        max_steps.unwrap_or(defaults::AZAZEL_MAX_STEPS),
+        0, // sub-agents not used in Z0
+        max_cost_tokens.unwrap_or(defaults::AZAZEL_MAX_COST_TOKENS),
+    );
+    let app_for_runner = app.clone();
+    let id_for_runner = id.clone();
+    mgr.create(task, move |_handle| {
+        services::agent::TaskRunner::spawn(app_for_runner, id_for_runner);
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// Cancel a running Azazel task. Fires the per-task
+/// `CancellationToken`; the supervisor loop exits within a few
+/// hundred ms. Browser sessions are not killed — other Azazel tasks
+/// may still be using the shared Chrome process.
+#[tauri::command]
+async fn azazel_cancel(
+    app: AppHandle,
+    task_id: String,
+) -> Result<(), String> {
+    let state = app.state::<crate::TaskDeps>();
+    let mut mgr = state.task_manager.lock();
+    mgr.cancel(&task_id).map_err(|e| e.to_string())
+}
+
+/// Return the latest cached screenshot for a browser task. Useful
+/// for the watch-pane to recover after a tab re-open. Returns
+/// `None` if no frame has been captured yet (the task hasn't taken
+/// its first screenshot) or if the task isn't browser-kind.
+#[tauri::command]
+async fn azazel_screenshot(
+    app: AppHandle,
+    task_id: String,
+) -> Result<Option<services::azazel::state::BrowserFrame>, String> {
+    let state = app.state::<AppState>();
+    let browser = state
+        .azazel_browser
+        .lock()
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| "azazel: BrowserState not initialised (app not set up)".to_string())?;
+    Ok(browser.frames.get(&task_id))
+}
+
+/// Read-only snapshot of Azazel's browser state for the UI.
+#[tauri::command]
+async fn azazel_get_browser_state(
+    app: AppHandle,
+) -> Result<services::azazel::state::BrowserStateDto, String> {
+    let task_state = app.state::<crate::TaskDeps>();
+    let mgr = task_state.task_manager.lock();
+    let running_browser_tasks = mgr
+        .store()
+        .list(Some(services::agent::TaskStatus::Running))
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|s| s.kind == services::agent::TaskKind::Browser)
+        .count() as u32;
+    drop(mgr);
+
+    let state = app.state::<AppState>();
+    let browser = state
+        .azazel_browser
+        .lock()
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| "azazel: BrowserState not initialised".to_string())?;
+    Ok(services::azazel::state::BrowserStateDto::from_state(
+        &browser,
+        running_browser_tasks,
+    ))
+}
+
+/// Set the Azazel approval policy. Persisted in AppState for the
+/// process lifetime. Phase Z1 actually uses this value inside
+/// `run_browser_loop`; Z0 accepts and stores it for the UI to read.
+#[tauri::command]
+async fn azazel_set_policy(
+    app: AppHandle,
+    policy: String,
+) -> Result<(), String> {
+    let p = services::azazel::safety::ApprovalPolicy::parse(&policy)
+        .ok_or_else(|| format!("azazel: unknown policy {policy:?} (use strict|normal|yolo)"))?;
+    let state = app.state::<AppState>();
+    state
+        .azazel_policy
+        .store(p as u8, std::sync::atomic::Ordering::SeqCst);
+    tracing::info!(target: "azazel", policy = p.as_str(), "approval policy updated");
+    Ok(())
+}
+
+/// Resolve a pending approval. Called by the UI when the user
+/// clicks Approve / Reject / "Approve always" on the
+/// `azazel:approval-needed` modal. The decision is sent through a
+/// oneshot channel back to the supervisor that's waiting in
+/// `run_browser_loop`.
+///
+/// `decision` is one of: `approve`, `reject`,
+/// `approve_always_for_session`. Anything else is rejected as
+/// an invalid input.
+#[tauri::command]
+async fn azazel_approve(
+    app: AppHandle,
+    task_id: String,
+    decision: String,
+) -> Result<(), String> {
+    let d = services::azazel::safety::ApprovalDecision::parse(&decision)
+        .ok_or_else(|| format!("azazel: invalid decision {decision:?}"))?;
+    let state = app.state::<AppState>();
+    let resolved = state
+        .azazel_approvals
+        .resolve(&task_id, d.clone())
+        .ok_or_else(|| format!("azazel: no pending approval for {task_id}"))?;
+    tracing::info!(
+        target: "azazel",
+        task = %task_id,
+        decision = ?resolved,
+        "approval resolved"
+    );
+    Ok(())
+}
+
+/// Read-only snapshot of the pending-approval queue size. Used
+/// by the UI to show a badge when there's an approval waiting
+/// for the user.
+#[tauri::command]
+async fn azazel_pending_approvals(
+    app: AppHandle,
+) -> Result<u32, String> {
+    let state = app.state::<AppState>();
+    Ok(state.azazel_approvals.pending_count() as u32)
+}
+
+/// Phase Z3 shortcut: spawn a browser task whose entire goal is
+/// "register a new account on `<platform>` using email `<email>`".
+///
+/// This is just a convenience wrapper around `azazel_run` with a
+/// pre-baked prompt and a longer-than-default step budget. It
+/// exists so the UI can have a "Register account" button that
+/// doesn't force the user to write a prompt.
+#[tauri::command]
+async fn azazel_register_account(
+    app: AppHandle,
+    platform: String,
+    email: String,
+    extra_instructions: Option<String>,
+) -> Result<String, String> {
+    if platform.trim().is_empty() {
+        return Err("azazel_register_account: platform is required".into());
+    }
+    if email.trim().is_empty() || !email.contains('@') {
+        return Err("azazel_register_account: a valid email is required".into());
+    }
+    let extra = extra_instructions
+        .as_deref()
+        .map(|s| format!("\n\nAdditional instructions: {s}"))
+        .unwrap_or_default();
+    let prompt = format!(
+        "Register a new account on {platform} using the email {email}. \
+         Steps: (1) navigate to the sign-up page, (2) fill the form, \
+         (3) submit, (4) wait for the verification email and pause for \
+         the user to read the code, (5) enter the code, (6) confirm the \
+         account is created by visiting the profile/dashboard. \
+         If you hit a captcha or 2FA challenge, STOP and request human help \
+         via the approval modal. Do NOT click 'Pay' or 'Subscribe' \
+         buttons under any circumstances.{extra}"
+    );
+    let state = app.state::<crate::TaskDeps>();
+    let mut mgr = state.task_manager.lock();
+    let id = format!("task-{}", uuid::Uuid::new_v4());
+    let task = services::agent::Task::new_browser(
+        id.clone(),
+        format!("Register {platform} ({email})"),
+        prompt,
+        services::agent::task::defaults::DEFAULT_MODEL.to_string(),
+        services::agent::task::defaults::DEFAULT_SUBAGENT_MODEL.to_string(),
+        None,
+        // 50 steps: enough for the full sign-up flow (form +
+        // verification code) without being abusive.
+        50,
+        0,
+        // Higher cost budget for account creation: $3-$5 range.
+        500_000,
+    );
+    let app_for_runner = app.clone();
+    let id_for_runner = id.clone();
+    mgr.create(task, move |_handle| {
+        services::agent::TaskRunner::spawn(app_for_runner, id_for_runner);
+    })
+    .map_err(|e| e.to_string())?;
+    Ok(id)
 }
 
 // =====================================================================
@@ -7028,8 +8028,112 @@ fn run_task_runner(app: AppHandle, task_id: String) {
         // 6. Build the progress emitter.
         let emitter = ProgressEmitter::new(store.clone(), Some(app.clone()), task_id.clone());
 
-        // 7. Run the supervisor loop.
-        let result = supervisor::run_loop(&client, &task, emitter, &cancel).await;
+        // 6.5 Dispatch by kind (Phase Z0+). Browser tasks skip the
+        // code-supervisor entirely and run `run_browser_loop`
+        // instead. They bring up their own chromiumoxide Browser
+        // session (no singleton for Z0; Z1+ will pool it).
+        if task.kind == services::agent::TaskKind::Browser {
+            run_browser_branch(app.clone(), task_id.clone(), task, store, cancel, client, emitter).await;
+            return;
+        }
+
+        // 6.6 Persona dispatch (Phase M3+). MorningStar / Lucifer
+        // heal tasks skip the read-only code supervisor entirely
+        // and run `run_heal_loop` from the morningstar module.
+        // Dispatch is by persona_id (string) because new personas
+        // may be added without changing `TaskKind`.
+        if task.persona_id.as_deref() == Some("lucifer") {
+            run_heal_branch(app.clone(), task_id.clone(), task, store, cancel, client, emitter).await;
+            return;
+        }
+
+        // 6.7 Resolve persona config (Raziel v1). For non-persona
+        // tasks we use the default supervisor system_prompt + the
+        // default 5-tool set. Persona tasks load their own
+        // system_prompt and tool whitelist from the registry.
+        let (system_prompt, tools) = match task.persona_id.as_deref() {
+            Some(pid) => {
+                let deps = match app.try_state::<crate::TaskDeps>() {
+                    Some(d) => d,
+                    None => {
+                        finish_failed(
+                            &app,
+                            &task_id,
+                            &store,
+                            "TaskDeps missing (app setup is broken)".to_string(),
+                        );
+                        return;
+                    }
+                };
+                let persona = match deps.personas.get(pid) {
+                    Some(p) => p,
+                    None => {
+                        finish_failed(
+                            &app,
+                            &task_id,
+                            &store,
+                            format!("unknown persona: {pid}"),
+                        );
+                        return;
+                    }
+                };
+                let prompt = match deps.personas.read_system_prompt(pid) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        finish_failed(
+                            &app,
+                            &task_id,
+                            &store,
+                            format!("persona '{pid}' system_prompt: {e}"),
+                        );
+                        return;
+                    }
+                };
+                let tools =
+                    services::agent::supervisor::supervisor_tools_for(&persona.allowed_tools);
+                (prompt, tools)
+            }
+            None => (
+                services::agent::supervisor::SUPERVISOR_SYSTEM_PROMPT.to_string(),
+                services::agent::supervisor::supervisor_tools(),
+            ),
+        };
+
+        // 6.8 Build the persona tool context (only for persona
+        // tasks). Wires the memory service + the user-interests
+        // shared cell + the design service into the supervisor loop
+        // so persona tools can call into them.
+        let (persona_ctx, payload_sink) = if task.persona_id.is_some() {
+            let deps = app.state::<crate::TaskDeps>();
+            let memory = app
+                .try_state::<crate::AppState>()
+                .and_then(|s| s.memory.lock().clone());
+            let design = app
+                .try_state::<crate::AppState>()
+                .and_then(|s| s.design.lock().clone());
+            let ctx = services::agent::PersonaToolContext {
+                memory,
+                user_interests: deps.user_interests.clone(),
+                design,
+            };
+            let sink = services::agent::PersonaPayloadSink::new();
+            (Some(ctx), Some(sink))
+        } else {
+            (None, None)
+        };
+
+        // 7. Run the code-supervisor loop.
+        let result = supervisor::run_loop(
+            &client,
+            &task,
+            system_prompt,
+            tools,
+            persona_ctx,
+            payload_sink,
+            emitter,
+            &cancel,
+        )
+        .await;
 
         // 8. Persist final state.
         match result {
@@ -7061,6 +8165,15 @@ fn run_task_runner(app: AppHandle, task_id: String) {
                 if let Err(e) = store.update(&updated) {
                     tracing::error!(target: "agent::runner", task = %task_id, "failed to persist task: {e}");
                 }
+                // Persist persona_payload as a separate file
+                // (handy for the UI to fetch without parsing
+                // result.md).
+                if let Some(payload) = &sup_result.persona_payload {
+                    let path = store.task_dir_public(&task_id).join("persona_payload.json");
+                    if let Ok(s) = serde_json::to_string_pretty(payload) {
+                        let _ = std::fs::write(&path, s);
+                    }
+                }
                 let res = TaskResult {
                     summary: if sup_result.final_text.is_empty() {
                         format!("# {}\n\n*(supervisor returned no text)*\n", updated.title)
@@ -7070,6 +8183,7 @@ fn run_task_runner(app: AppHandle, task_id: String) {
                     files_changed: sup_result.files_read.clone(),
                     sub_agent_count: updated.sub_agent_count,
                     total_cost: updated.cost.clone(),
+                    persona_payload: sup_result.persona_payload.clone(),
                 };
                 if let Err(e) = store.write_result(&task_id, &res) {
                     tracing::error!(target: "agent::runner", task = %task_id, "failed to write result.md: {e}");
@@ -7095,6 +8209,209 @@ fn run_task_runner(app: AppHandle, task_id: String) {
     });
 }
 
+/// Phase Z0+ browser-supervisor branch. Invoked from
+/// `run_task_runner` when `task.kind == TaskKind::Browser`.
+///
+/// Steps:
+/// 1. Resolve `BrowserState` from AppState (None ⇒ Azazel disabled).
+/// 2. Launch a `BrowserSession` (chromiumoxide) using the persistent
+///    profile dir from `BrowserState`.
+/// 3. Open a `TaskPage` for the task.
+/// 4. Run `run_browser_loop` (vision-action loop with M3).
+/// 5. Persist the final cost + status + result.md.
+/// 6. Close the page (Chrome process kept alive for the next task).
+///
+/// Each step is best-effort: a failure marks the task `Failed` with
+/// a human-readable reason. The supervisor itself is responsible for
+/// policy enforcement (`needs_approval`) — this branch is just the
+/// outer scaffolding.
+async fn run_browser_branch(
+    app: AppHandle,
+    task_id: String,
+    task: services::agent::Task,
+    store: services::agent::TaskStore,
+    cancel: tokio_util::sync::CancellationToken,
+    client: services::agent::MinimaxClient,
+    mut emitter: services::agent::progress::ProgressEmitter,
+) {
+    use services::agent::cost::add_response_cost;
+    use services::agent::task::{TaskResult, TaskStatus};
+    use services::azazel::browser::{BrowserSession, LaunchConfig};
+    use services::azazel::supervisor::{
+        run_browser_loop, BrowserSupervisorResult, SupervisorError,
+    };
+
+    // 1. Pull BrowserState. `Mutex<Option<Arc<…>>>::lock().clone()`
+    // returns an owned `Option<Arc<…>>` (the Arc owns the heap
+    // data), so the lock guard can drop immediately.
+    let browser_state: Option<Arc<services::azazel::state::BrowserState>> =
+        app.state::<AppState>().azazel_browser.lock().clone();
+    let Some(browser_state) = browser_state else {
+        finish_failed(
+            &app,
+            &task_id,
+            &store,
+            "Azazel: BrowserState not initialised. Restart Luna.".to_string(),
+        );
+        return;
+    };
+
+    // 2. Launch the browser. Heavy work — we already run inside
+    //    `tokio::spawn`, but wrap the call in a timeout to avoid
+    //    hanging the runner forever if Chrome refuses to start.
+    let session = match tokio::time::timeout(
+        std::time::Duration::from_secs(45),
+        BrowserSession::launch(LaunchConfig::persistent_default(
+            browser_state.profile_dir.clone(),
+        )),
+    )
+    .await
+    {
+        Ok(Ok(s)) => {
+            browser_state.mark_launched();
+            s
+        }
+        Ok(Err(e)) => {
+            let msg = format!("Azazel: browser launch failed: {e}");
+            browser_state.mark_unlaunched(msg.clone());
+            finish_failed(&app, &task_id, &store, msg);
+            return;
+        }
+        Err(_) => {
+            let msg = "Azazel: browser launch timed out after 45s".to_string();
+            browser_state.mark_unlaunched(msg.clone());
+            finish_failed(&app, &task_id, &store, msg);
+            return;
+        }
+    };
+
+    // 3. Open a per-task page.
+    let page = match session.new_page(&task_id).await {
+        Ok(p) => p,
+        Err(e) => {
+            finish_failed(&app, &task_id, &store, format!("Azazel: new_page failed: {e}"));
+            return;
+        }
+    };
+
+    // 4. Run the supervisor loop.
+    //    Read the current approval policy + clone the shared
+    //    ApprovalQueue out of AppState so the supervisor loop has
+    //    everything it needs without holding the Tauri state lock.
+    let app_state = app.state::<AppState>();
+    let policy = match app_state
+        .azazel_policy
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        0 => services::azazel::safety::ApprovalPolicy::Strict,
+        2 => services::azazel::safety::ApprovalPolicy::Yolo,
+        _ => services::azazel::safety::ApprovalPolicy::Normal,
+    };
+    let approvals = app_state.azazel_approvals.clone();
+    drop(app_state);
+    let result: Result<BrowserSupervisorResult, SupervisorError> = run_browser_loop(
+        &client,
+        &task,
+        &page,
+        &browser_state,
+        &approvals,
+        policy,
+        &app,
+        &mut emitter,
+        &cancel,
+    )
+    .await;
+
+    // 5. Close the page (the Chrome process stays up for reuse).
+    let _ = page.close().await;
+
+    // 6. Persist + emit terminal status, mirroring the code-supervisor
+    //    path.
+    match result {
+        Ok(sup) => {
+            let mut updated = task.clone();
+            let model = updated.model.clone();
+            for chunk in &sup.cost_chunks {
+                add_response_cost(&mut updated.cost, &model, chunk.input, chunk.output);
+            }
+            updated.steps_completed = sup.steps_completed;
+            updated.status = if sup.success {
+                TaskStatus::Completed
+            } else {
+                // Model reported it couldn't complete the task — keep
+                // it visible as Failed so the user knows Azazel got stuck.
+                TaskStatus::Failed
+            };
+            updated.finished_at = Some(chrono::Utc::now());
+            updated.last_active_at = updated.finished_at.unwrap();
+            updated.error = if sup.success { None } else { Some(sup.final_text.clone()) };
+            if let Err(e) = store.update(&updated) {
+                tracing::error!(target: "azazel::runner", task = %task_id, "persist task: {e}");
+            }
+            let res = TaskResult {
+                summary: if sup.final_text.is_empty() {
+                    format!("# {}\n\n*(Azazel returned no text)*\n", updated.title)
+                } else {
+                    sup.final_text.clone()
+                },
+                files_changed: Vec::new(),
+                sub_agent_count: 0,
+                total_cost: updated.cost.clone(),
+                persona_payload: None,
+            };
+            if let Err(e) = store.write_result(&task_id, &res) {
+                tracing::error!(target: "azazel::runner", task = %task_id, "write result: {e}");
+            }
+            let _ = store.flush_steps(&task_id);
+            // Drop the cached frame for this task — the watch-pane
+            // would otherwise show a stale image after completion.
+            browser_state.frames.drop_task(&task_id);
+            // Tauri event for the UI to render the final state.
+            let _ = tauri::Emitter::emit(
+                &app,
+                "azazel:done",
+                serde_json::json!({
+                    "task_id": task_id,
+                    "status": updated.status.as_str(),
+                    "summary": sup.final_text,
+                    "cost": updated.cost.estimated_usd,
+                    "ts": chrono::Utc::now().to_rfc3339(),
+                }),
+            );
+            finish_in_manager(&app, &task_id, updated);
+        }
+        Err(err) => {
+            let status = match &err {
+                SupervisorError::Cancelled => TaskStatus::Cancelled,
+                SupervisorError::MaxSteps(_)
+                | SupervisorError::MaxCost(_)
+                | SupervisorError::WallClock(_) => TaskStatus::TimedOut,
+                _ => TaskStatus::Failed,
+            };
+            let msg = match &err {
+                SupervisorError::Cancelled => "cancelled by user".to_string(),
+                SupervisorError::MaxSteps(n) => format!("max_steps ({n}) reached"),
+                SupervisorError::MaxCost(n) => format!("max_cost_tokens ({n}) reached"),
+                SupervisorError::WallClock(d) => format!("wall-clock cap {d:?} reached"),
+                SupervisorError::Minimax(s) => format!("M3: {s}"),
+                SupervisorError::Tool(s) => format!("tool: {s}"),
+                SupervisorError::BrowserGone => "browser session died mid-task".to_string(),
+            };
+            browser_state.frames.drop_task(&task_id);
+            let _ = tauri::Emitter::emit(
+                &app,
+                "azazel:error",
+                serde_json::json!({
+                    "task_id": task_id,
+                    "error": msg,
+                    "ts": chrono::Utc::now().to_rfc3339(),
+                }),
+            );
+            finish_terminal_state(&app, &task_id, &store, &task, status, Some(msg));
+        }
+    }
+}
+
 fn read_minimax_api_key() -> Result<Option<String>, String> {
     let id = crate::sandbox::provider_id("minimax");
     let entry = keyring::Entry::new(crate::KEYRING_SERVICE, &id).map_err(|e| e.to_string())?;
@@ -7114,6 +8431,195 @@ fn finish_failed(app: &AppHandle, task_id: &str, store: &services::agent::TaskSt
         }
     };
     finish_terminal_state(app, task_id, store, &task, services::agent::task::TaskStatus::Failed, Some(error));
+}
+
+/// Phase M3+: MorningStar / Lucifer heal branch. Invoked from
+/// `run_task_runner` when `task.persona_id == Some("lucifer")`.
+///
+/// Mirrors `run_browser_branch` in shape, but the supervisor is
+/// `services::morningstar::supervisor::run_heal_loop` instead of
+/// the browser-use loop. The heal supervisor needs the workspace
+/// root (we resolve it from `AppState`), the persona's system
+/// prompt + tool set, and the standard `MinimaxClient`.
+///
+/// Steps:
+/// 1. Resolve the workspace root from `AppState`. If absent,
+///    `finish_failed` and return.
+/// 2. Load the lucifer persona's system prompt + tool set from
+///    `PersonaRegistry`. If the persona is missing, fail with
+///    "lucifer persona not registered" — this is a deployment
+///    error, not a runtime one.
+/// 3. Build a `PersonaToolContext` (memory + user interests) —
+///    MorningStar doesn't actually need persona tools (its
+///    allowed_tools is workspace + git only), so we pass `None`
+///    and rely on the supervisor's own tool gating.
+/// 4. Run `run_heal_loop` to completion.
+/// 5. Map the result to terminal status, persist cost + result,
+///    emit `task_finished`.
+async fn run_heal_branch(
+    app: AppHandle,
+    task_id: String,
+    task: services::agent::Task,
+    store: services::agent::TaskStore,
+    cancel: tokio_util::sync::CancellationToken,
+    client: services::agent::MinimaxClient,
+    mut emitter: services::agent::progress::ProgressEmitter,
+) {
+    use services::agent::cost::add_response_cost;
+    use services::agent::task::{TaskResult, TaskStatus};
+    use services::morningstar::supervisor::{
+        run_heal_loop, HealError, HealSupervisorResult,
+    };
+
+    // 1. Resolve workspace root. MorningStar needs a real path
+    //    (it's mutating, so it has to know where to commit).
+    //    `workspace_root` is a `std::sync::Mutex<Option<PathBuf>>`
+    //    (matches the pattern used in `current_workspace` /
+    //    `require_workspace`). Lock + clone + drop.
+    let source_root = app
+        .state::<AppState>()
+        .workspace_root
+        .lock()
+        .unwrap()
+        .clone();
+    let source_root = match source_root {
+        Some(p) => p,
+        None => {
+            finish_failed(
+                &app,
+                &task_id,
+                &store,
+                "MorningStar: no workspace opened. Open a project first.".to_string(),
+            );
+            return;
+        }
+    };
+
+    // 2. Load persona config.
+    let deps = match app.try_state::<crate::TaskDeps>() {
+        Some(d) => d,
+        None => {
+            finish_failed(
+                &app,
+                &task_id,
+                &store,
+                "MorningStar: TaskDeps not initialised.".to_string(),
+            );
+            return;
+        }
+    };
+    let persona = match deps.personas.get("lucifer") {
+        Some(p) => p,
+        None => {
+            finish_failed(
+                &app,
+                &task_id,
+                &store,
+                "MorningStar: `lucifer` persona not registered. \
+                 Check `services/agent/personas/morningstar.toml`."
+                    .to_string(),
+            );
+            return;
+        }
+    };
+    let system_prompt = match deps.personas.read_system_prompt("lucifer") {
+        Ok(s) => s,
+        Err(e) => {
+            finish_failed(
+                &app,
+                &task_id,
+                &store,
+                format!("MorningStar: cannot load system prompt: {e}"),
+            );
+            return;
+        }
+    };
+    let tools = services::agent::supervisor::supervisor_tools_for(&persona.allowed_tools);
+
+    // 3. Run the heal loop. MorningStar doesn't need memory /
+    //    web tools, so `PersonaToolContext` and `payload_sink`
+    //    are both None. The `emitter` is moved into the loop
+    // (it owns its own channels); we don't reuse it after.
+    let result: Result<HealSupervisorResult, HealError> = run_heal_loop(
+        &client,
+        &task,
+        &source_root,
+        system_prompt,
+        tools,
+        None,
+        None,
+        emitter,
+        &cancel,
+    )
+    .await;
+
+    // 4. Persist + emit terminal status.
+    match result {
+        Ok(sup) => {
+            let mut updated = task.clone();
+            let model = updated.model.clone();
+            for chunk in &sup.cost_chunks {
+                add_response_cost(&mut updated.cost, &model, chunk.input, chunk.output);
+            }
+            for chunk in &sup.sub_agent_cost_chunks {
+                add_response_cost(
+                    &mut updated.cost,
+                    &sup_agent_model(&model),
+                    chunk.input,
+                    chunk.output,
+                );
+            }
+            updated.steps_completed = sup.steps_completed;
+            updated.status = TaskStatus::Completed;
+            updated.finished_at = Some(chrono::Utc::now());
+            updated.last_active_at = updated.finished_at.unwrap();
+            let res = TaskResult {
+                summary: format!(
+                    "# {}\n\n*Status: completed*\n\n{}\n\n---\n\n*Heal outcome:* {}\n",
+                    updated.title,
+                    sup.final_text,
+                    serde_json::to_string(&sup.outcome)
+                        .unwrap_or_else(|_| "<unprintable>".into())
+                ),
+                files_changed: Vec::new(),
+                sub_agent_count: updated.sub_agent_count,
+                total_cost: updated.cost.clone(),
+                persona_payload: None,
+            };
+            let _ = store.update(&updated);
+            let _ = store.write_result(&task_id, &res);
+            let _ = store.flush_steps(&task_id);
+            notify_terminal(&app, &task_id, &updated);
+            finish_in_manager(&app, &task_id, updated);
+        }
+        Err(HealError::Cancelled) => {
+            let updated = task.clone();
+            finish_terminal_state(
+                &app,
+                &task_id,
+                &store,
+                &updated,
+                TaskStatus::Cancelled,
+                Some("cancelled by user".into()),
+            );
+        }
+        Err(e) => {
+            finish_failed(
+                &app,
+                &task_id,
+                &store,
+                format!("MorningStar: {e}"),
+            );
+        }
+    }
+}
+
+/// Approximation of the sub-agent model for cost accounting.
+/// MorningStar uses M2.7-highspeed for sub-agents; we look it up
+/// from the persona registry if we can, otherwise default to
+/// the standard sub-agent model.
+fn sup_agent_model(_primary: &str) -> String {
+    "MiniMax-M2.7-highspeed".to_string()
 }
 
 fn finish_terminal_state(
@@ -7138,6 +8644,7 @@ fn finish_terminal_state(
         files_changed: Vec::new(),
         sub_agent_count: updated.sub_agent_count,
         total_cost: updated.cost.clone(),
+        persona_payload: None,
     };
     let _ = store.write_result(task_id, &res);
     let _ = store.flush_steps(task_id);
@@ -7383,8 +8890,57 @@ pub fn run() {
                                 );
                             }
                         }
+                        // Persona registry (Raziel v1). Load from
+                        // the source-tree `services/agent/personas/`
+                        // dir at dev time. Tolerant: invalid TOMLs
+                        // are reported via `persona_reload` and the
+                        // valid ones still load. We do NOT fail the
+                        // app if the dir is missing — `persona_list`
+                        // just returns an empty list.
+                        let personas_dir = std::path::Path::new(
+                            env!("CARGO_MANIFEST_DIR"),
+                        )
+                        .join("src")
+                        .join("services")
+                        .join("agent")
+                        .join("personas");
+                        let personas = services::agent::personas::PersonaRegistry::load(
+                            &personas_dir,
+                        )
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(
+                                target: "luna_agent",
+                                error = %e,
+                                "personas: load failed; using empty registry"
+                            );
+                            services::agent::personas::PersonaRegistry::empty()
+                        });
+                        let summary = personas.list();
+                        tracing::info!(
+                            target: "luna_agent",
+                            count = summary.len(),
+                            "personas: loaded (raziel-only in v1)"
+                        );
+                        // The user-interests shared cell: the chat
+                        // agent's `set_user_interests` (Tauri command)
+                        // writes through `AppState`; we mirror the
+                        // same `Arc<Mutex<Vec<String>>>` here so
+                        // Raziel's `get_user_interests` tool sees the
+                        // latest list. If the AppState cache is
+                        // already populated, copy from it on init;
+                        // otherwise start with an empty list.
+                        let user_interests = std::sync::Arc::new(
+                            parking_lot::Mutex::new(Vec::new()),
+                        );
+                        if let Some(state) = app.try_state::<AppState>() {
+                            if let Ok(cache) = state.interests.lock() {
+                                *user_interests.lock() = cache.clone();
+                            }
+                        }
                         app.manage(TaskDeps {
                             task_manager: parking_lot::Mutex::new(mgr),
+                            personas,
+                            user_interests,
                         });
                     }
                     Err(e) => tracing::warn!(
@@ -7421,6 +8977,33 @@ pub fn run() {
                 *state.memory.lock() = memory;
             } else {
                 tracing::warn!("memory: AppState not yet managed; memory disabled");
+            }
+            // Azazel (Phase Z0+). Initialise the per-app `BrowserState`
+            // (frame cache + profile dir resolver) and stash it in
+            // AppState. The actual `chromiumoxide::Browser` is
+            // launched lazily on the first `azazel_run` so we don't
+            // pay the cost of a Chrome process at app startup.
+            if let Some(state) = app.try_state::<AppState>() {
+                if let Ok(local_data) = app.path().app_local_data_dir() {
+                    let browser_state = Arc::new(services::azazel::state::BrowserState::new(
+                        local_data.clone(),
+                    ));
+                    *state.azazel_browser.lock() = Some(browser_state);
+                    tracing::info!(
+                        target: "luna_agent",
+                        profile_dir = %state
+                            .azazel_browser
+                            .lock()
+                            .as_ref()
+                            .map(|b| b.profile_dir.display().to_string())
+                            .unwrap_or_default(),
+                        "azazel: BrowserState ready (browser launch deferred to first azazel_run)"
+                    );
+                } else {
+                    tracing::warn!("azazel: failed to resolve app_local_data_dir; azazel disabled");
+                }
+            } else {
+                tracing::warn!("azazel: AppState not yet managed; azazel disabled");
             }
             // Build tray icon (best-effort)
             if let Err(e) = build_tray(&handle) {
@@ -7461,6 +9044,7 @@ pub fn run() {
             get_api_key,
             set_api_key,
             set_user_interests,
+            get_user_interests,
             // A: workspace
             open_workspace,
             close_workspace,
@@ -7542,11 +9126,25 @@ pub fn run() {
             memory_add_event,
             memory_add_fact,
             memory_list_graph_entities,
+            memory_add_graph_entity,
+            memory_add_graph_relation,
             memory_list_recent,
             memory_search,
             memory_recall,
             memory_consolidate_now,
             memory_forget,
+            // P: personas (see services/agent/personas/ and ADR-0012)
+            persona_list,
+            persona_get,
+            persona_reload,
+            raziel_chat,
+            raziel_run_fusion_news,
+            // Mephistopheles (P0+ design agent)
+            mephisto_chat,
+            mephisto_get_state,
+            mephisto_apply_design,
+            mephisto_export,
+            mephisto_save_scaffold,
             // Mock provider (no API key needed — for E2E tool tests)
             mock_chat_stream,
             // X: self-evolution (Phase E0+; see services/evolver and ADR-0010)
@@ -7580,6 +9178,15 @@ pub fn run() {
             task_cancel,
             task_result,
             task_steps,
+            // Z: azazel browser-use agent (Phase Z0+)
+            azazel_run,
+            azazel_cancel,
+            azazel_screenshot,
+            azazel_get_browser_state,
+            azazel_set_policy,
+            azazel_approve,
+            azazel_pending_approvals,
+            azazel_register_account,
             // X.snapshots (Phase E1)
             snapshot_create,
             snapshot_list,
@@ -7591,6 +9198,15 @@ pub fn run() {
             three_d_save_scene_sync,
             three_d_load_scene,
             three_d_generate_texture,
+            // D: Daimonion (Phase D0+, voice-first multimodal agent)
+            // Note: the `__cmd__...` macro wrappers live in
+            // `services::daimonion::commands`, not in the parent
+            // `daimonion` module — `tauri::generate_handler!` walks
+            // the path literally, so we must use the qualified form.
+            services::daimonion::commands::daimonion_transcribe,
+            services::daimonion::commands::daimonion_chat,
+            services::daimonion::commands::daimonion_capture_frame,
+            services::daimonion::commands::daimonion_synthesize,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

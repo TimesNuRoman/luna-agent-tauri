@@ -5,6 +5,15 @@ edition = "2021"
 license = "Proprietary"
 publish = false
 
+[features]
+# Phase D0+. Includes the in-memory mock ASR/TTS clients used by
+# the unit tests in services::daimonion. Production builds leave
+# this off so the mock module is compiled out.
+daimonion-test-mocks = []
+# Default feature set: just the live paths. Tests opt-in to mocks
+# by running `cargo test --features daimonion-test-mocks`.
+default = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -32,6 +41,7 @@ tokio-stream = "0.1"
 url = "2"
 open = "5"
 regex = "1"
+toml = "0.8"
 xcap = "0.9"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 base64 = "0.22"
@@ -81,6 +91,31 @@ walkdir = "2"
 #   - `tauri-plugin-notification` for "task done" desktop toasts
 tokio-util = { version = "0.7", features = ["rt"] }
 tauri-plugin-notification = "2"
+
+# ---- Azazel browser-use agent (Phase Z0+) ----
+# Azazel = autonomous browser-use agent. Phase Z0:
+#   - `chromiumoxide` for persistent Chrome (CDP over tokio)
+#   - `base64` is already in the dep tree (used by services::vision)
+# Phase Z1+ may add: `fantoccini` (alternative CDP), `headless_chrome`.
+# Notes:
+#   - chromiumoxide 0.7 needs Rust ≥ 1.70 (we run 1.98 — OK).
+#   - The `process` feature is REQUIRED for `Browser::launch` to spawn
+#     a Chrome subprocess via `tokio::process`. We pin to it
+#     explicitly because we also turn off the default `headless` mode
+#     and don't want to accidentally bring in the (incompatible)
+#     `headless_chrome` shim.
+#   - The `tokio-runtime` feature is the async runtime (we already
+#     have `tokio = full`, so this is a no-op token-wise but it
+#     disables the optional `async-std-runtime`).
+#   - Bundle impact: chromiumoxide does NOT bundle a Chromium binary;
+#     you point it at a system Chrome via `BrowserConfig::with_executable`
+#     or let it auto-discover (`%ProgramFiles%\Google\Chrome\...`).
+# chromiumoxide 0.7 has no isolated `process` feature — process
+# management ships under the `default` feature set (which also
+# pulls in `tokio` runtime, `bytes`, and `fetcher`). Leaving
+# `default-features = true` here; the dep adds ~1 MB to the binary
+# and 2-3 transitive deps (winreg, which, async-tungstenite-tokio).
+chromiumoxide = "0.7"
 
 [profile.release]
 panic = "abort"
