@@ -291,6 +291,75 @@ All under `src-tauri/src/services/evolver/`:
 └── <sb-uuid>/
 ```
 
+## 11. Personas (Phase P — see `adr/0012-personas.md`)
+
+A persona is a **named, config-driven agent** that runs on the
+same `supervisor::run_loop` as the anonymous code supervisor, but
+with a custom system prompt, a curated tool whitelist, and a
+per-mode model choice. v1 ships one persona: **Raziel** (keeper of
+memory + Fusion News researcher).
+
+### Files
+
+```
+src-tauri/src/services/agent/
+  personas/
+    mod.rs                  # types: AgentPersona, PersonaMode, PersonaTrigger
+    registry.rs             # PersonaRegistry: load + hot-reload + lookup
+    raziel.toml             # config: model_per_mode, allowed_tools, budget
+    prompts/raziel_system.md   # system prompt (memory + fusion_news tails)
+  persona_tools.rs          # 15 tool definitions + execution context
+```
+
+### Spawn flow
+
+```
+UI: persona switcher → "🜂 Raziel — memory"
+ → invoke('raziel_chat', { message, mode: 'memory' })
+ → lib.rs::raziel_chat:
+     registry.get('raziel') → AgentPersona
+     registry.read_system_prompt('raziel') → string
+     registry.model_for('raziel', Memory) → 'M2.7-highspeed'
+     Task::new(..., persona_id: Some('raziel'), ...)
+     TaskManager::create(task, runner_closure)
+ → TaskRunner::spawn → supervisor::run_loop(
+     system_prompt = raziel_system.md,
+     tools = supervisor_tools_for(persona.allowed_tools),  // 15 tools
+     persona_ctx = Some(PersonaToolContext { memory, user_interests }),
+     payload_sink = Some(PersonaPayloadSink::new()),
+ )
+```
+
+### Persona tools
+
+Raziel's 15 tools live in `persona_tools.rs` and are dispatched
+inside `supervisor::execute_tool` (single `is_persona_tool(name)`
+check). They cover memory CRUD (10), web/news (3), user interests
+(1), and a special `produce_fusion_payload` that writes a
+structured `Vec<FusionNewsItem>` into the `PersonaPayloadSink`.
+
+### Fusion News payload
+
+When Raziel runs in `fusion_news` mode and calls
+`produce_fusion_payload`, the structured result is:
+1. Returned from `supervisor::run_loop` as
+   `SupervisorResult::persona_payload`.
+2. Copied by the runner into `TaskResult::persona_payload` AND
+   written to `<task_dir>/persona_payload.json` on disk.
+3. Read by the UI (which subscribes to `task_finished` and calls
+   `task_result`) to render Fusion News cards without parsing
+   markdown.
+
+### Adding a new persona
+
+Drop a new `*.toml` + a matching `prompts/<id>_system.md` into
+`services/agent/personas/`, then call `persona_reload` (or restart
+the app). The registry validates the TOML against `VALID_TOOLS`
+and the on-disk system prompt file at load time.
+
+---
+
+
 ---
 
 *This document is a **snapshot**, not a history. For change history, see

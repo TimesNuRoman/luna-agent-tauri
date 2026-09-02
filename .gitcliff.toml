@@ -1,0 +1,72 @@
+# .gitcliff.toml
+# git-cliff (https://git-cliff.org) configuration.
+# Generates CHANGELOG.md from Conventional Commits.
+# Usage: `git cliff --tag v0.1.0 --output CHANGELOG.md`
+#        or `git cliff --unreleased --output CHANGELOG.md` for the WIP section.
+
+[changelog]
+header = """
+# Changelog — Luna Agent
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+and [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
+
+"""
+# Show "BREAKING CHANGE" prominently in the body.
+body = """
+{% if version %}\
+    ## [{{ version }}]({{ commit_id | default(value="") }}) — {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+    ## [unreleased]
+{% endif %}\
+{% for group, commits in commits | filter(attribute="merge_commit", value=false) | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits | sort(attribute="message") %}
+- {{ commit.message | split(pat="\n") | first | trim }}\
+{% if commit.breaking %} **(BREAKING)**{% endif %} ({{ commit.id | truncate(length=7, end="") }})
+{%- if commit.footers is defined and commit.footers is iterable %}
+{%- for footer in commit.footers %}{% if footer.token == "Refs" %}{% set refs = footer.value %}{% endif %}{% endfor %}
+{%- if refs %} — {{ refs }}{% endif %}
+{%- endif %}
+{% endfor %}
+{% endfor %}\n
+"""
+# Section ordering (top-to-bottom in the changelog).
+trim = true
+postprocessors = []
+
+[git]
+# Conventional Commits parser.
+conventional_commits = true
+# Recognise "BREAKING CHANGE" in body or `!` in header.
+filter_unconventional = true
+# Skip merge commits.
+split_commits = false
+
+[bump]
+features_always_bump_minor = false
+breaking_always_bump_major = true
+
+[commit_parsers]
+# Map Conventional Commits types to Keep-a-Changelog sections.
+{ message = "^feat", group = "Added" }
+{ message = "^fix", group = "Fixed" }
+{ message = "^perf", group = "Changed" }
+{ message = "^refactor", group = "Changed" }
+{ message = "^docs", group = "Documentation" }
+{ message = "^test", group = "Testing" }
+{ message = "^build", group = "Build" }
+{ message = "^ci", group = "CI" }
+{ message = "^chore", group = "Chores" }
+{ message = "^style", group = "Chores" }
+{ message = "^revert", group = "Removed" }
+# Anything else → skip (e.g., random commit messages from the past).
+{ message = ".*", group = "Other", skip = true }
+
+[changelog.git]
+# Link to GitHub if/when the repo is published; placeholder for now.
+# Once the repo URL is decided, fill these in.
+# github = { owner = "...", repo = "..." }

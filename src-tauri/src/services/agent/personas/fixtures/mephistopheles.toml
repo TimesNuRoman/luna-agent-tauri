@@ -1,0 +1,42 @@
+# Test fixture for mephistopheles persona — minimal valid TOML.
+# Used by services/agent/personas/registry.rs::tests.
+
+id            = "mephistopheles"
+display_name  = "Мефистофель"
+display_name_alt = "Mephisto"
+role          = "Test fixture for design agent"
+
+system_prompt_path = "prompts/mephistopheles_system.md"
+
+[model_per_mode]
+generic = "MiniMax-M3"
+
+default_model    = "MiniMax-M3"
+sub_agent_model  = "MiniMax-M2.7-highspeed"
+
+allowed_tools = [
+  "read_file",
+  "list_dir",
+  "search_workspace",
+  "create_file",
+  "edit_file",
+  "design_image_generate",
+  "design_palette_generate",
+  "design_brief_get",
+  "design_brief_set",
+  "design_manifest_get",
+  "design_manifest_set",
+  "design_scaffold_generate",
+  "design_component_propose",
+  "design_copy_generate",
+  "design_copy_apply",
+  "design_apply",
+  "dispatch_subagent",
+]
+
+max_steps        = 50
+max_subagents    = 4
+max_cost_tokens  = 2_000_000
+
+[[default_triggers]]
+kind = "manual"

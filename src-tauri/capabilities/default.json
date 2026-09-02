@@ -1,0 +1,30 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability for Luna Agent main window. Covers core + app commands + shell open + dialog + fs + stt + global-shortcut + clipboard + custom window_control.",
+  "windows": ["main", "preview-*"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "core:webview:default",
+    "core:app:default",
+    "core:path:default",
+    "shell:allow-open",
+    "dialog:default",
+    "fs:default",
+    "stt:default",
+    "stt:allow-list-models",
+    "stt:allow-install-model",
+    "stt:allow-set-active-model",
+    "stt:allow-unload-model",
+    "stt:allow-start-listening",
+    "stt:allow-stop-listening",
+    "global-shortcut:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-is-registered",
+    "clipboard-manager:default"
+  ]
+}
+

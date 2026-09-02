@@ -1,0 +1,69 @@
+# ─────────── OS ───────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─────────── Editor / IDE ───────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+.aider*
+.opencode/
+
+# ─────────── Node / JS / TS ───────────
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.tsbuildinfo
+.npm/
+.eslintcache
+.prettiercache
+
+# ─────────── Rust / Cargo / Tauri ───────────
+src-tauri/target/
+src-tauri/Cargo.lock.bak
+src-tauri/gen/schemas/
+src-tauri/WixTools/
+
+# ─────────── Local app data (per-machine, NEVER commit) ───────────
+.luna/index/
+.luna/cache/
+.luna/sessions/
+src-tauri/.env
+.env
+.env.local
+.env.*.local
+
+# ─────────── Secrets & keys (defense in depth — never commit) ───────────
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*.gpg
+
+# ─────────── Build / coverage artifacts ───────────
+*.log
+tools-cargo*.log
+tools-vite*.log
+build.stderr.log
+build.stdout.log
+cargo-check.log
+coverage/
+*.lcov
+.nyc_output/
+
+# ─────────── Lefthook / local hook state ───────────
+.lefthook-local/
+# Per-machine ADR tool state (referenced from docs/adr/README.md)
+.adr-dir
+
+# ─────────── Test scratch (outside src-tauri) ───────────
+test-sandbox/
+compile_test.mjs
+*.bak

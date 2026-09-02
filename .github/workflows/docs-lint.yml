@@ -1,0 +1,164 @@
+name: docs-lint
+
+# Lightweight checks that:
+#   1) the architecture-tracking files exist and aren't empty
+#   2) ADR files have valid MADR 4.0 front-matter
+#   3) the ADR index lists all ADR files
+#   4) docs/state.md has the required snapshot blocks
+#
+# This workflow is cheap (no Rust toolchain, no Node install — pure bash +
+# grep). It runs on every PR and on push to main.
+
+on:
+  pull_request:
+    paths:
+      - "**"
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  required-files:
+    name: required files exist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required files exist and are non-empty
+        run: |
+          set -euo pipefail
+          required=(
+            "AGENTS.md"
+            "docs/architecture.md"
+            "docs/state.md"
+            "docs/security-model.md"
+            "docs/tool-protocol.md"
+            "docs/adr/README.md"
+            "CHANGELOG.md"
+            "CONTRIBUTING.md"
+          )
+          failed=0
+          for f in "${required[@]}"; do
+            if [[ ! -s "$f" ]]; then
+              echo "::error file=$f::Required file missing or empty: $f"
+              failed=1
+            fi
+          done
+          if [[ $failed -ne 0 ]]; then
+            echo "::error::One or more required files are missing or empty."
+            exit 1
+          fi
+          echo "OK: all required files present."
+
+  state-shape:
+    name: docs/state.md has required blocks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify state.md contains required headings
+        run: |
+          set -euo pipefail
+          for block in "## Phase" "## Done" "## In progress" "## Blockers"; do
+            if ! grep -qE "^${block}\b" docs/state.md; then
+              echo "::error file=docs/state.md::Missing required block: $block"
+              exit 1
+            fi
+          done
+          echo "OK: docs/state.md has all required snapshot blocks."
+
+  architecture-shape:
+    name: docs/architecture.md has at least one Mermaid block
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify architecture.md has a Mermaid diagram
+        run: |
+          set -euo pipefail
+          # Mermaid blocks are ```mermaid ... ``` in markdown.
+          if ! grep -qE '^```mermaid' docs/architecture.md; then
+            echo "::error file=docs/architecture.md::No Mermaid diagram found. Add at least one."
+            exit 1
+          fi
+          echo "OK: docs/architecture.md has a Mermaid diagram."
+
+  adr-frontmatter:
+    name: ADR front-matter is valid MADR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate front-matter of every ADR
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          adrs=(docs/adr/[0-9]*.md)
+          if [[ ${#adrs[@]} -eq 0 ]]; then
+            echo "::error::No ADR files found in docs/adr/."
+            exit 1
+          fi
+          for f in "${adrs[@]}"; do
+            # Check that file starts with `---` and has a second `---` closing the front-matter.
+            first_line=$(head -n1 "$f")
+            if [[ "$first_line" != "---" ]]; then
+              echo "::error file=$f::Does not start with YAML front-matter (---)."
+              exit 1
+            fi
+            if ! awk 'NR>1 && /^---$/ {found=1; exit} END{exit !found}' "$f"; then
+              echo "::error file=$f::Front-matter not closed (missing second ---)."
+              exit 1
+            fi
+            # Check required keys in front-matter.
+            for key in status date deciders; do
+              if ! awk 'NR>1 && /^---$/ {exit} /^'"$key"':/ {found=1} END{exit !found}' "$f"; then
+                echo "::error file=$f::Front-matter missing key: $key"
+                exit 1
+              fi
+            done
+            # Status must be one of allowed values.
+            status=$(awk 'NR>1 && /^---$/ {exit} /^status:/ {print $2}' "$f")
+            case "$status" in
+              proposed|accepted|rejected|deprecated|superseded) ;;
+              *) echo "::error file=$f::Invalid status: $status (must be proposed|accepted|rejected|deprecated|superseded)"; exit 1 ;;
+            esac
+            echo "OK: $f (status=$status)"
+          done
+
+  adr-index:
+    name: docs/adr/README.md index lists all ADR files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check index completeness
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # Extract ADR file numbers from the index.
+          indexed=$(grep -oE '\[[0-9]{4}\]\(\./[0-9]{4}-[^)]+\.md\)' docs/adr/README.md | grep -oE '[0-9]{4}' | sort -u || true)
+          # Extract ADR file numbers actually on disk.
+          on_disk=$(for f in docs/adr/[0-9]*.md; do
+            base=$(basename "$f" .md)
+            echo "${base:0:4}"
+          done | sort -u)
+          missing=()
+          while IFS= read -r n; do
+            [[ -z "$n" ]] && continue
+            if ! grep -qE "^${n}\b" <<< "$on_disk"; then :; fi
+            if ! grep -qE "^${n}$" <<< "$on_disk"; then
+              missing+=("index has $n but no file on disk")
+            fi
+          done <<< "$indexed"
+          # Files on disk not in index.
+          while IFS= read -r n; do
+            [[ -z "$n" ]] && continue
+            if ! grep -qE "^${n}$" <<< "$indexed"; then
+              missing+=("file $n exists but not in index")
+            fi
+          done <<< "$on_disk"
+          if [[ ${#missing[@]} -ne 0 ]]; then
+            printf '::error::ADR index is out of sync:\n'
+            printf '  - %s\n' "${missing[@]}"
+            exit 1
+          fi
+          echo "OK: docs/adr/README.md is in sync with on-disk ADR files."

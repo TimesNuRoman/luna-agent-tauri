@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- Background gradient: deep night sky, diagonal -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1A0E45"/>
+      <stop offset="55%" stop-color="#2A1670"/>
+      <stop offset="100%" stop-color="#421C8C"/>
+    </linearGradient>
+
+    <!-- Inner glow highlight (top-left) -->
+    <radialGradient id="glow" cx="0.32" cy="0.28" r="0.95">
+      <stop offset="0%" stop-color="#8B6CFF" stop-opacity="0.55"/>
+      <stop offset="60%" stop-color="#3A1B8C" stop-opacity="0.0"/>
+    </radialGradient>
+
+    <!-- Moon body gradient (white -> cool blue) -->
+    <linearGradient id="moon" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="55%" stop-color="#EAF1FF"/>
+      <stop offset="100%" stop-color="#A9BEF7"/>
+    </linearGradient>
+
+    <!-- Cyan rim light along the inner curve of the crescent -->
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#7DF9FF" stop-opacity="0.0"/>
+      <stop offset="50%" stop-color="#7DF9FF" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#7DF9FF" stop-opacity="0.0"/>
+    </linearGradient>
+
+    <!-- AI accent star core -->
+    <radialGradient id="star" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="40%" stop-color="#A8F4FF"/>
+      <stop offset="100%" stop-color="#3DD8FF" stop-opacity="0.0"/>
+    </radialGradient>
+
+    <!-- Squircle (rounded square) clip-path: 1024x1024 with ~22% corner radius (iOS-style) -->
+    <clipPath id="squircle">
+      <rect x="0" y="0" width="1024" height="1024" rx="228" ry="228"/>
+    </clipPath>
+
+    <!-- Crescent mask: white = keep, black = cut out.
+         A full disc minus an offset disc gives a clean crescent
+         that lets the background show through, no dark artifact. -->
+    <mask id="crescentMask" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect x="0" y="0" width="1024" height="1024" fill="black"/>
+      <circle cx="420" cy="540" r="280" fill="white"/>
+      <circle cx="538" cy="488" r="270" fill="black"/>
+    </mask>
+
+    <!-- Soft drop shadow for the moon -->
+    <filter id="moonShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="10"/>
+      <feOffset dx="0" dy="6" result="off"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.40"/></feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Glow filter for the AI star -->
+    <filter id="starGlow" x="-200%" y="-200%" width="500%" height="500%">
+      <feGaussianBlur stdDeviation="12" result="b1"/>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="b2"/>
+      <feMerge>
+        <feMergeNode in="b1"/>
+        <feMergeNode in="b2"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- 1) Squircle background -->
+  <g clip-path="url(#squircle)">
+    <rect x="0" y="0" width="1024" height="1024" fill="url(#bg)"/>
+    <rect x="0" y="0" width="1024" height="1024" fill="url(#glow)"/>
+
+    <!-- Faint background stars (tiny so they vanish at small sizes) -->
+    <g fill="#FFFFFF" opacity="0.55">
+      <circle cx="180" cy="200" r="2.5"/>
+      <circle cx="250" cy="340" r="1.6"/>
+      <circle cx="130" cy="540" r="1.4"/>
+      <circle cx="330" cy="820" r="1.8"/>
+      <circle cx="870" cy="200" r="2.2"/>
+      <circle cx="900" cy="420" r="1.5"/>
+      <circle cx="780" cy="830" r="1.8"/>
+      <circle cx="640" cy="150" r="1.4"/>
+    </g>
+
+    <!-- 2) Crescent moon (masked white disc -> crescent shape, lets bg show through) -->
+    <g filter="url(#moonShadow)">
+      <rect x="0" y="0" width="1024" height="1024" fill="url(#moon)" mask="url(#crescentMask)"/>
+    </g>
+
+    <!-- 3) Cyan rim light along the inner edge of the crescent -->
+    <!-- Drawn as a thin stroked circle aligned to the cutter, clipped to squircle -->
+    <g clip-path="url(#squircle)">
+      <circle cx="538" cy="488" r="270" fill="none"
+              stroke="url(#rim)" stroke-width="8" opacity="0.9"
+              transform="rotate(-20 538 488)"/>
+    </g>
+
+    <!-- 4) AI accent: glowing star near the upper-right "tip" of the crescent -->
+    <g filter="url(#starGlow)">
+      <circle cx="730" cy="335" r="58" fill="url(#star)"/>
+      <circle cx="730" cy="335" r="13" fill="#FFFFFF"/>
+    </g>
+  </g>
+
+  <!-- 5) Subtle inner border for crisp edge on light backgrounds -->
+  <rect x="1" y="1" width="1022" height="1022" rx="227" ry="227"
+        fill="none" stroke="#000000" stroke-opacity="0.18" stroke-width="2"/>
+</svg>

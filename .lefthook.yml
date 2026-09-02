@@ -1,0 +1,71 @@
+# .lefthook.yml
+# Native (no Node) git hooks manager. Faster than husky, no pre-commit node
+# overhead. Install once with: `lefthook install`.
+# Docs: https://lefthook.dev/configuration/
+#
+# Bypass in emergencies: `LEFTHOOK=0 git commit ...` (or use `--no-verify`).
+#
+# Hooks:
+#   pre-commit:   run `cargo check` on the Rust side, `tsc --noEmit` on the
+#                 frontend, and a markdown-link sanity check on docs.
+#   commit-msg:   run commitlint to enforce Conventional Commits.
+#   pre-push:     run `cargo test` for a fuller check before pushing.
+
+min_version: 1.6.0
+
+pre-commit:
+  parallel: true
+  commands:
+    rust_check:
+      glob: "src-tauri/**/*.rs"
+      run: cargo check --quiet --manifest-path src-tauri/Cargo.toml
+    frontend_typecheck:
+      glob: "{src/**/*.{ts,svelte},vite.config.ts,tsconfig.json}"
+      run: npx --no-install tsc --noEmit
+    docs_link_check:
+      glob: "{docs/**,AGENTS.md,README.md,CHANGELOG.md,CONTRIBUTING.md}"
+      run: |
+        # Quick local check: detect obvious dead links to docs/adr/ files.
+        # Full link-check (http + anchors) is heavier; CI handles that.
+        set -e
+        if command -v rg >/dev/null 2>&1; then
+          # Find .md files.
+          files=$(rg --files -g '*.md' -g '!CHANGELOG.md' -g '!docs/adr/00*.md' . || true)
+          echo "$files" | while read -r f; do
+            [[ -z "$f" ]] && continue
+            # Find markdown links to docs/adr/NNNN-*.md and check target exists.
+            rg -oE '\]\(\.?\.?/?docs/adr/[0-9]{4}-[^)]+\.md\)' "$f" 2>/dev/null | \
+              sed -E 's#^\]\(##' | \
+              sed -E 's#\)$##' | \
+              while read -r target; do
+                [[ -z "$target" ]] && continue
+                # Strip leading ./ and ../ to normalize.
+                norm=$(realpath -m --relative-to=. "$f/../$target" 2>/dev/null || echo "$target")
+                if [[ ! -f "$norm" ]]; then
+                  echo "lefthook(docs): broken link in $f -> $target"
+                  exit 1
+                fi
+              done
+          done
+        fi
+
+commit-msg:
+  commands:
+    commitlint:
+      # Use npx if @commitlint/cli is in devDependencies; fall back to a
+      # Docker image if not installed. Repo tracks the config in
+      # commitlint.config.cjs at the root.
+      run: |
+        if [ -d node_modules/@commitlint/cli ]; then
+          npx --no-install commitlint --edit "$1"
+        else
+          echo "lefthook: @commitlint/cli not installed yet; skipping commitlint."
+          echo "lefthook: run 'npm install' to enable."
+        fi
+
+pre-push:
+  parallel: false
+  commands:
+    rust_test:
+      glob: "src-tauri/**/*.rs"
+      run: cargo test --quiet --manifest-path src-tauri/Cargo.toml
