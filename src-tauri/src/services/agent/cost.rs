@@ -84,6 +84,50 @@ pub fn add_subagent_cost(
 }
 
 // =====================================================================
+// Mephistopheles (P0+) — image + copy call cost
+// =====================================================================
+//
+// Image generation (image-01) and the M3 copy-generation call are
+// priced differently than token-based chat. We track them as flat
+// per-call fees (in USD) on top of the token-based estimate. When
+// the platform exposes per-image / per-call usage fields, these
+// become fallbacks.
+
+/// Per-image USD price for `image-01` at 1024².
+pub const IMAGE_GEN_COST_PER_IMAGE_USD: f64 = 0.04;
+/// Per-image USD price for `image-01` at 2K / HD.
+pub const IMAGE_GEN_COST_PER_IMAGE_HD_USD: f64 = 0.08;
+/// Per-call flat fee for a copy-generation request (3-7 variants on M3).
+/// ~$0.015 is roughly the M3 cost of a 1-2K-token round-trip for a
+/// structured JSON copy task. We round up to be safe.
+pub const COPY_GEN_COST_PER_CALL_USD: f64 = 0.015;
+/// Per-call flat fee for a scaffold-generation request (component / page / app).
+/// Heavier than copy (4K output tokens), so ~$0.025.
+pub const SCAFFOLD_GEN_COST_PER_CALL_USD: f64 = 0.025;
+
+/// Apply image-generation cost to a `TaskCost`. The persona tool
+/// tracks this separately from token usage so the UI can show
+/// "X images × $0.04 = $0.16" in the cost breakdown.
+pub fn add_image_gen_cost(cost: &mut super::task::TaskCost, n: u32, hd: bool) {
+    let per_image = if hd {
+        IMAGE_GEN_COST_PER_IMAGE_HD_USD
+    } else {
+        IMAGE_GEN_COST_PER_IMAGE_USD
+    };
+    cost.estimated_usd += per_image * n as f64;
+}
+
+/// Apply a copy-generation call cost (flat fee).
+pub fn add_copy_cost(cost: &mut super::task::TaskCost) {
+    cost.estimated_usd += COPY_GEN_COST_PER_CALL_USD;
+}
+
+/// Apply a scaffold-generation call cost (flat fee).
+pub fn add_scaffold_cost(cost: &mut super::task::TaskCost) {
+    cost.estimated_usd += SCAFFOLD_GEN_COST_PER_CALL_USD;
+}
+
+// =====================================================================
 // Tests
 // =====================================================================
 
@@ -156,5 +200,36 @@ mod tests {
         assert_eq!(cost.output_tokens, 50);
         assert_eq!(cost.sub_agent_input_tokens, 200);
         assert_eq!(cost.sub_agent_output_tokens, 100);
+    }
+
+    #[test]
+    fn add_image_gen_cost_scales_with_n() {
+        let mut cost = TaskCost::default();
+        add_image_gen_cost(&mut cost, 4, false);
+        let expected = IMAGE_GEN_COST_PER_IMAGE_USD * 4.0;
+        assert!((cost.estimated_usd - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn add_image_gen_cost_hd_uses_hd_price() {
+        let mut cost = TaskCost::default();
+        add_image_gen_cost(&mut cost, 1, true);
+        assert!((cost.estimated_usd - IMAGE_GEN_COST_PER_IMAGE_HD_USD).abs() < 1e-9);
+    }
+
+    #[test]
+    fn add_copy_cost_is_flat() {
+        let mut cost = TaskCost::default();
+        add_copy_cost(&mut cost);
+        assert!((cost.estimated_usd - COPY_GEN_COST_PER_CALL_USD).abs() < 1e-9);
+        add_copy_cost(&mut cost);
+        assert!((cost.estimated_usd - 2.0 * COPY_GEN_COST_PER_CALL_USD).abs() < 1e-9);
+    }
+
+    #[test]
+    fn add_scaffold_cost_is_flat() {
+        let mut cost = TaskCost::default();
+        add_scaffold_cost(&mut cost);
+        assert!((cost.estimated_usd - SCAFFOLD_GEN_COST_PER_CALL_USD).abs() < 1e-9);
     }
 }

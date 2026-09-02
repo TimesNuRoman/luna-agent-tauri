@@ -20,8 +20,12 @@
 //! `task_result`, `task_steps` Tauri commands.
 
 pub mod cost;
+pub mod git_tools;
 pub mod manager;
+pub mod mephisto_tools;
 pub mod minimax_client;
+pub mod persona_tools;
+pub mod personas;
 pub mod progress;
 pub mod runner;
 pub mod subagent;
@@ -40,9 +44,11 @@ pub use minimax_client::{
     MinimaxResponse, MinimaxTool, MinimaxToolCall, MinimaxToolFunction, UserContent,
 };
 #[allow(unused_imports)]
+pub use persona_tools::{FusionNewsItem, PersonaPayloadSink, PersonaToolContext};
+#[allow(unused_imports)]
 pub use progress::{LiveKind, ProgressEmitter, RATE_LIMIT_HZ, RATE_LIMIT_INTERVAL};
 #[allow(unused_imports)]
-pub use runner::TaskRunner;
+pub use runner::{SupervisorKind, TaskRunner};
 #[allow(unused_imports)]
 pub use supervisor::{run_loop as run_supervisor_loop, CostChunk, SupervisorResult};
 #[allow(unused_imports)]

@@ -179,7 +179,7 @@ pub async fn dispatch_subagent(
         for call in &response.tool_calls {
             let args: serde_json::Value = serde_json::from_str(&call.function.arguments)
                 .unwrap_or(serde_json::Value::Null);
-            let outcome = execute_tool(&call.function.name, &args, task).await;
+            let outcome = execute_tool(&call.function.name, &args, task, None, None).await;
             messages.push(MinimaxMessage::Tool {
                 tool_call_id: call.id.clone(),
                 content: if outcome.content.len() > 4000 {

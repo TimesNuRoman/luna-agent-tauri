@@ -173,6 +173,14 @@ pub struct Task {
     /// vision-action loop. Defaults to `Code` for backward compat.
     #[serde(default)]
     pub kind: TaskKind,
+    /// Persona id (e.g. `"raziel"`). When set, the runner pulls the
+    /// persona's system prompt + tool whitelist from
+    /// `services::agent::personas::PersonaRegistry` instead of using
+    /// the hard-coded supervisor defaults. `None` for anonymous
+    /// chat-driven tasks. Defaults to `None` for backward compat
+    /// (pre-Raziel `meta.json` files keep working).
+    #[serde(default)]
+    pub persona_id: Option<String>,
     /// Supervisor model (M3 in v1).
     pub model: String,
     /// Sub-agent model (M2.7-highspeed in v1).
@@ -282,6 +290,7 @@ impl Task {
             prompt,
             status: TaskStatus::Pending,
             kind,
+            persona_id: None,
             model,
             sub_agent_model,
             parent_chat_id,
@@ -318,6 +327,7 @@ impl Task {
             title: self.title.clone(),
             status: self.status,
             kind: self.kind,
+            persona_id: self.persona_id.clone(),
             model: self.model.clone(),
             parent_chat_id: self.parent_chat_id.clone(),
             created_at: self.created_at,
@@ -342,6 +352,11 @@ pub struct TaskSummary {
     /// from a pre-Z0 `index.json`.
     #[serde(default)]
     pub kind: TaskKind,
+    /// Persona id (e.g. `"raziel"`). Mirrors `Task::persona_id`.
+    /// `None` for anonymous tasks. Defaults to `None` for backward
+    /// compat with pre-Raziel `index.json` files.
+    #[serde(default)]
+    pub persona_id: Option<String>,
     pub model: String,
     pub parent_chat_id: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -422,6 +437,14 @@ pub struct TaskResult {
     pub sub_agent_count: u32,
     /// Total cost at the time of completion.
     pub total_cost: TaskCost,
+    /// Persona-specific structured output. Set by persona tools such
+    /// as `produce_fusion_payload` (Raziel's Fusion News feed), the
+    /// runner copies it from the supervisor's `SupervisorResult`
+    /// into here on completion, and the UI reads it for non-markdown
+    /// rendering (cards, graphs, etc.). `None` for anonymous tasks
+    /// and personas that don't emit a structured payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persona_payload: Option<serde_json::Value>,
 }
 
 impl TaskResult {
@@ -433,6 +456,7 @@ impl TaskResult {
             files_changed: Vec::new(),
             sub_agent_count: 0,
             total_cost: task.cost.clone(),
+            persona_payload: None,
         }
     }
 }

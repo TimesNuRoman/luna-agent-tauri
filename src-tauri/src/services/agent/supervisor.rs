@@ -25,9 +25,13 @@
 //! applying them to the `Task` and persisting. This keeps `run_loop`
 //! side-effect-free w.r.t. the task state.
 
+use super::git_tools;
 use super::minimax_client::{
     MinimaxClient, MinimaxMessage, MinimaxRequest, MinimaxResponse, MinimaxTool,
     MinimaxToolFunction,
+};
+use super::persona_tools::{
+    is_persona_tool, PersonaPayloadSink, PersonaToolContext,
 };
 use super::progress::ProgressEmitter;
 use super::task::{Task, TaskStep};
@@ -117,6 +121,33 @@ pub fn supervisor_tools() -> Vec<MinimaxTool> {
             },
         },
     ]
+    .into_iter()
+    .chain(git_tools::tool_definitions())
+    .collect()
+}
+
+/// Filter the supervisor's default tool set by the persona's
+/// `allowed_tools` whitelist. Adds persona-specific tool
+/// definitions (from `persona_tools::persona_tool_definitions()`)
+/// for any names that are persona tools but not in the default
+/// set. Unknown names are silently dropped (the registry
+/// validates them at load time, so this is just defense-in-depth).
+///
+/// `allowed` may be empty — that returns an empty tool list, which
+/// is fine for purely-text tasks.
+pub fn supervisor_tools_for(allowed: &[String]) -> Vec<MinimaxTool> {
+    let defaults = supervisor_tools();
+    let persona = super::persona_tools::persona_tool_definitions();
+    let mut out: Vec<MinimaxTool> = Vec::new();
+    for name in allowed {
+        if let Some(t) = defaults.iter().find(|t| &t.function.name == name) {
+            out.push(t.clone());
+        } else if let Some(t) = persona.iter().find(|t| &t.function.name == name) {
+            out.push(t.clone());
+        }
+        // else: unknown tool, dropped
+    }
+    out
 }
 
 // =====================================================================
@@ -153,6 +184,11 @@ pub struct SupervisorResult {
     pub files_read: Vec<String>,
     /// Whether the loop exited because of a fatal error.
     pub error: Option<String>,
+    /// Persona-specific structured payload (Raziel's `produce_fusion_payload`
+    /// output, for example). The runner copies it into
+    /// `TaskResult::persona_payload`. `None` for anonymous tasks
+    /// and personas that don't emit a structured payload.
+    pub persona_payload: Option<serde_json::Value>,
 }
 
 // =====================================================================
@@ -168,13 +204,32 @@ pub struct ToolOutcome {
 /// Dispatch one tool call. The supervisor calls this for each
 /// `tool_call` in the model's response. Returns the content that should
 /// be sent back to the model as a `tool` message.
+///
+/// When `persona_ctx` is `Some`, persona-specific tools (memory_*,
+/// web_*, fetch_*, get_user_interests, produce_fusion_payload) are
+/// dispatched via `persona_tools::execute_persona_tool`. Workspace
+/// tools (read_file, list_dir, …) are unaffected.
 pub async fn execute_tool(
     name: &str,
     args: &serde_json::Value,
-    _task: &Task,
+    task: &Task,
+    persona_ctx: Option<&PersonaToolContext>,
+    payload_sink: Option<&PersonaPayloadSink>,
 ) -> ToolOutcome {
-    // Tools operate on the source root by default. We resolve it here
-    // so the tool body doesn't have to.
+    // Persona tools first (no source_root needed).
+    if is_persona_tool(name) {
+        let Some(ctx) = persona_ctx else {
+            return ToolOutcome {
+                content: format!("error: persona tool '{name}' called without PersonaToolContext"),
+                is_error: true,
+            };
+        };
+        let sink = payload_sink.cloned().unwrap_or_default();
+        return super::persona_tools::execute_persona_tool(name, args, ctx, &sink, task).await;
+    }
+
+    // Workspace tools operate on the source root by default. We
+    // resolve it here so the tool body doesn't have to.
     let source_root = match inspect::resolve_source_root().0 {
         Some(p) => p,
         None => {
@@ -190,6 +245,7 @@ pub async fn execute_tool(
         "list_dir" => tool_list_dir(args, &source_root).await,
         "search_workspace" => tool_search_workspace(args, &source_root).await,
         "run_command" => tool_run_command(args, &source_root).await,
+        n if git_tools::is_git_tool(n) => git_tools::execute(n, args, &source_root).await,
         _ => ToolOutcome {
             content: format!("error: unknown tool '{name}'"),
             is_error: true,
@@ -353,20 +409,31 @@ async fn tool_run_command(args: &serde_json::Value, source_root: &std::path::Pat
 /// `Err(msg)`. Budget limits (max_steps / max_cost_tokens / 30-min cap)
 /// are returned as `Err` with a descriptive message; the runner
 /// translates that to a `TimedOut` / `Failed` task status.
+///
+/// `system_prompt` and `tools` come from the runner: for an
+/// anonymous task they're the defaults (`SUPERVISOR_SYSTEM_PROMPT`
+/// + `supervisor_tools()`); for a Raziel task they're loaded from
+/// `PersonaRegistry` and filtered through `supervisor_tools_for`.
+///
+/// `persona_ctx` and `payload_sink` are `Some` only for persona
+/// tasks. They enable the persona-specific tool set
+/// (`memory_*`, `web_*`, etc.) and capture the `produce_fusion_payload`
+/// output into `SupervisorResult::persona_payload`.
 pub async fn run_loop(
     client: &MinimaxClient,
     task: &Task,
+    system_prompt: String,
+    tools: Vec<MinimaxTool>,
+    persona_ctx: Option<PersonaToolContext>,
+    payload_sink: Option<PersonaPayloadSink>,
     mut progress: ProgressEmitter,
     cancel: &CancellationToken,
 ) -> Result<SupervisorResult, String> {
-    // System prompt: explain the role + available tools.
-    let system_prompt = SUPERVISOR_SYSTEM_PROMPT.to_string();
     let mut messages: Vec<MinimaxMessage> = vec![
         MinimaxMessage::system(system_prompt),
         MinimaxMessage::user_text(task.prompt.clone()),
     ];
 
-    let tools = supervisor_tools();
     let started = Instant::now();
     let max_duration = Duration::from_secs(30 * 60); // 30 min hard cap
 
@@ -437,6 +504,11 @@ pub async fn run_loop(
         // If no tool calls → done.
         if response.tool_calls.is_empty() {
             progress.flush();
+            // Drain the persona payload sink (if any) so the
+            // caller gets the structured Fusion News cards.
+            let persona_payload = payload_sink
+                .as_ref()
+                .and_then(|s| s.take());
             return Ok(SupervisorResult {
                 final_text: response.content,
                 cost_chunks,
@@ -444,6 +516,7 @@ pub async fn run_loop(
                 steps_completed,
                 files_read,
                 error: None,
+                persona_payload,
             });
         }
 
@@ -493,12 +566,6 @@ pub async fn run_loop(
                     cancel,
                 )
                 .await;
-                // Accumulate sub-agent cost in our chunks (the
-                // runner will apply it via add_subagent_cost on the
-                // TaskCost). Mark them with a synthetic CostChunk
-                // extension: we already returned the sub-agent cost
-                // chunks here, so add them to a separate tracking
-                // vec and emit a CostUpdate step.
                 let sub_input: u64 = sub_result.cost_chunks.iter().map(|c| c.input).sum();
                 let sub_output: u64 = sub_result.cost_chunks.iter().map(|c| c.output).sum();
                 sub_agent_cost_chunks.extend(sub_result.cost_chunks);
@@ -520,7 +587,14 @@ pub async fn run_loop(
                 });
                 continue;
             }
-            let outcome = execute_tool(&call.function.name, &args, task).await;
+            let outcome = execute_tool(
+                &call.function.name,
+                &args,
+                task,
+                persona_ctx.as_ref(),
+                payload_sink.as_ref(),
+            )
+            .await;
             progress.emit(&TaskStep::ToolResult {
                 ts: chrono::Utc::now(),
                 tool_use_id: call.id.clone(),
@@ -559,7 +633,11 @@ fn truncate(s: &str, max: usize) -> String {
 // System prompt
 // =====================================================================
 
-const SUPERVISOR_SYSTEM_PROMPT: &str = "You are the Luna Agent supervisor. The user has handed you a task to complete against the project's source code.\n\
+/// Default system prompt for anonymous (non-persona) tasks. The
+/// runner references this via the `SUPERVISOR_SYSTEM_PROMPT` const
+/// name (mirrored in the mod re-exports for convenience). Persona
+/// tasks replace this with their own prompt from the registry.
+pub const SUPERVISOR_SYSTEM_PROMPT: &str = "You are the Luna Agent supervisor. The user has handed you a task to complete against the project's source code.\n\
 You can use the available tools (read_file, list_dir, search_workspace, run_command, dispatch_subagent) to explore the code and gather information.\n\
 When you have enough information, write a concise final answer (no tool calls) describing what you found, the files you read, and any concrete recommendations.\n\
 Do NOT modify the source code; the user is in read-only mode for this task. To change code, the user must explicitly invoke the self-evolution subsystem.\n\
@@ -608,7 +686,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let task = dummy_task();
-            let r = execute_tool("nope", &serde_json::json!({}), &task).await;
+            let r = execute_tool("nope", &serde_json::json!({}), &task, None, None).await;
             assert!(r.is_error);
             assert!(r.content.contains("unknown tool"));
         });
@@ -619,7 +697,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let task = dummy_task();
-            let r = execute_tool("read_file", &serde_json::json!({}), &task).await;
+            let r = execute_tool("read_file", &serde_json::json!({}), &task, None, None).await;
             assert!(r.is_error);
             assert!(r.content.contains("'path' is required"));
         });
@@ -634,10 +712,34 @@ mod tests {
                 "list_dir",
                 &serde_json::json!({ "path": ".", "depth": 0 }),
                 &task,
+                None,
+                None,
             )
             .await;
             assert!(!r.content.is_empty() || r.is_error);
         });
+    }
+
+    #[test]
+    fn supervisor_tools_for_filters_and_adds_persona() {
+        // Allowed contains: 1 default tool, 1 persona tool, 1 unknown.
+        let allowed = vec![
+            "read_file".to_string(),
+            "memory_recall".to_string(),
+            "does_not_exist".to_string(),
+        ];
+        let tools = supervisor_tools_for(&allowed);
+        let names: Vec<&str> = tools.iter().map(|t| t.function.name.as_str()).collect();
+        assert!(names.contains(&"read_file"));
+        assert!(names.contains(&"memory_recall"));
+        assert!(!names.contains(&"run_command")); // not in allowed
+        assert!(!names.contains(&"does_not_exist"));
+    }
+
+    #[test]
+    fn supervisor_tools_for_empty_returns_empty() {
+        let tools = supervisor_tools_for(&[]);
+        assert!(tools.is_empty());
     }
 
     #[test]

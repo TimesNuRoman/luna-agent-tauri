@@ -5,17 +5,649 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Luna Agent</title>
   <style>
-    body { margin: 0; background: #09090b; color: #f0f0f5; font-family: Inter, system-ui, sans-serif; }
-    #loading { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 16px; }
-    .brand { font-size: 24px; font-weight: 700; color: #C9A0A0; }
-    .sub { font-size: 13px; color: #9090a0; }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; height: 100%; width: 100%;
+      background: #050509; color: #f0f0f5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "SF Pro Display", Inter, system-ui, sans-serif;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      user-select: none; cursor: default;
+    }
+
+    /* ----- Animated background orbs ----- */
+    .bg { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+    .orb { position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.45; will-change: transform; }
+    .orb-1 { width: 420px; height: 420px; background: #6366f1; top: -140px; left: -140px; animation: orb-float-1 14s ease-in-out infinite; }
+    .orb-2 { width: 520px; height: 520px; background: #a855f7; bottom: -180px; right: -180px; animation: orb-float-2 18s ease-in-out infinite; }
+    .orb-3 { width: 320px; height: 320px; background: #ec4899; top: 35%; left: 60%; animation: orb-float-3 22s ease-in-out infinite; opacity: 0.3; }
+    .orb-4 { width: 260px; height: 260px; background: #38bdf8; top: 60%; left: 5%; animation: orb-float-4 16s ease-in-out infinite; opacity: 0.25; }
+    @keyframes orb-float-1 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(80px, 60px) scale(1.15); } }
+    @keyframes orb-float-2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-60px, -80px) scale(1.1); } }
+    @keyframes orb-float-3 { 0%,100% { transform: translate(-50%,-50%) scale(1); } 50% { transform: translate(-30%,-70%) scale(1.2); } }
+    @keyframes orb-float-4 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(40px, -50px) scale(0.9); } }
+
+    .stars { position: fixed; inset: 0; z-index: 1; pointer-events: none; }
+    .star { position: absolute; width: 2px; height: 2px; border-radius: 50%; background: rgba(255,255,255,0.7); box-shadow: 0 0 4px rgba(255,255,255,0.5); animation: twinkle 3s ease-in-out infinite; }
+    @keyframes twinkle { 0%, 100% { opacity: 0.2; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.2); } }
+
+    /* ----- Splash stage ----- */
+    .stage { position: relative; z-index: 10; height: 100vh; width: 100vw; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 24px; transition: opacity 0.5s ease, transform 0.5s ease; }
+    .stage.dismissed { opacity: 0; transform: scale(1.05); pointer-events: none; }
+    .loading-content, .ready-content { display: flex; flex-direction: column; align-items: center; gap: 22px; transition: opacity 0.5s ease, transform 0.6s cubic-bezier(0.16, 1, 0.3, 1); }
+    .stage.ready .loading-content { opacity: 0; transform: scale(0.96) translateY(-8px); pointer-events: none; }
+    .ready-content { position: absolute; opacity: 0; transform: scale(0.94); pointer-events: none; }
+    .stage.ready .ready-content { position: relative; opacity: 1; transform: scale(1); pointer-events: auto; animation: card-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) both; }
+    @keyframes card-in { 0% { opacity: 0; transform: scale(0.94) translateY(10px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
+
+    .logo { position: relative; width: 88px; height: 88px; display: flex; align-items: center; justify-content: center; }
+    .moon {
+      position: absolute; inset: 0; border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, rgba(255,255,255,0.35), transparent 50%), linear-gradient(135deg, #f0d6c4 0%, #c9a0a0 45%, #7a5a5a 100%);
+      box-shadow: 0 0 50px rgba(201, 160, 160, 0.45), 0 0 100px rgba(201, 160, 160, 0.25), inset -8px -8px 24px rgba(0,0,0,0.35);
+      animation: moon-pulse 3.2s ease-in-out infinite;
+    }
+    .moon::after { content: ""; position: absolute; top: 6%; left: 22%; width: 60%; height: 60%; border-radius: 50%; background: #050509; box-shadow: 0 0 24px rgba(0,0,0,0.6); }
+    .moon::before { content: ""; position: absolute; top: 18%; left: 36%; width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 220, 200, 0.4); box-shadow: 14px 22px 0 -1px rgba(255, 220, 200, 0.35), -6px 30px 0 -2px rgba(255, 220, 200, 0.25); }
+    @keyframes moon-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+    .orbit { position: absolute; inset: -16px; border: 1px dashed rgba(201, 160, 160, 0.18); border-radius: 50%; animation: spin 16s linear infinite; }
+    .orbit::after { content: ""; position: absolute; top: -3px; left: 50%; width: 6px; height: 6px; border-radius: 50%; background: #c9a0a0; box-shadow: 0 0 12px #c9a0a0; transform: translateX(-50%); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .title { font-size: 30px; font-weight: 700; letter-spacing: -0.5px; background: linear-gradient(135deg, #ffffff 0%, #f0d6c4 40%, #c9a0a0 80%, #a87a7a 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-shadow: 0 0 30px rgba(201, 160, 160, 0.25); animation: title-in 1.1s cubic-bezier(0.16, 1, 0.3, 1) both; }
+    @keyframes title-in { from { opacity: 0; transform: translateY(14px); filter: blur(8px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
+
+    .dots { display: flex; gap: 10px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #c9a0a0; box-shadow: 0 0 8px rgba(201, 160, 160, 0.6); animation: dot-bounce 1.4s ease-in-out infinite; }
+    .dot:nth-child(2) { animation-delay: 0.15s; } .dot:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes dot-bounce { 0%, 80%, 100% { transform: translateY(0) scale(0.7); opacity: 0.4; } 40% { transform: translateY(-10px) scale(1.1); opacity: 1; } }
+
+    .status { font-size: 13px; color: #9090a0; letter-spacing: 0.3px; min-height: 18px; display: flex; align-items: center; }
+    .status-text { transition: opacity 0.18s ease; }
+    .cursor { display: inline-block; width: 8px; height: 14px; background: #c9a0a0; margin-left: 3px; box-shadow: 0 0 6px #c9a0a0; animation: blink 0.9s steps(1) infinite; }
+    @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+
+    .progress { width: 220px; height: 2px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; position: relative; }
+    .progress-bar { position: absolute; top: 0; left: 0; width: 30%; height: 100%; background: linear-gradient(90deg, transparent, #c9a0a0 30%, #f0d6c4 50%, #c9a0a0 70%, transparent); box-shadow: 0 0 12px rgba(201, 160, 160, 0.6); animation: progress-slide 1.8s cubic-bezier(0.65, 0, 0.35, 1) infinite; }
+    @keyframes progress-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
+
+    .ready-card { padding: 28px 36px; background: rgba(255,255,255,0.035); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border: 1px solid rgba(201, 160, 160, 0.18); border-radius: 18px; text-align: center; max-width: 460px; box-shadow: 0 8px 40px rgba(0,0,0,0.4), 0 0 60px rgba(201, 160, 160, 0.1), inset 0 1px 0 rgba(255,255,255,0.06); }
+    .ready-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: rgba(74, 222, 128, 0.1); border: 1px solid rgba(74, 222, 128, 0.3); color: #4ade80; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 14px; }
+    .ready-pulse { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 8px #4ade80; animation: ready-pulse-anim 1.6s ease-in-out infinite; }
+    @keyframes ready-pulse-anim { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
+    .ready-title { font-size: 20px; font-weight: 600; color: #f0f0f5; margin-bottom: 6px; }
+    .ready-sub { font-size: 13px; color: #9090a0; line-height: 1.55; }
+    .ready-list { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.06); text-align: left; }
+    .ready-item { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #b0b0c0; }
+    .ready-item::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #c9a0a0; box-shadow: 0 0 6px rgba(201, 160, 160, 0.6); flex: 0 0 auto; }
+
+    .start-btn { margin-top: 22px; display: inline-flex; align-items: center; gap: 8px; padding: 12px 28px; border-radius: 999px; border: none; cursor: pointer; font-family: inherit; font-size: 14px; font-weight: 600; letter-spacing: 0.3px; color: #050509; background: linear-gradient(135deg, #f0d6c4 0%, #c9a0a0 50%, #a87a7a 100%); box-shadow: 0 6px 24px rgba(201, 160, 160, 0.4), inset 0 1px 0 rgba(255,255,255,0.4); transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease; }
+    .start-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 32px rgba(201, 160, 160, 0.6), inset 0 1px 0 rgba(255,255,255,0.4); filter: brightness(1.08); }
+    .start-btn:active { transform: translateY(0); }
+    .start-btn svg { width: 14px; height: 14px; }
+
+    /* ----- Chat view ----- */
+    .chat { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; opacity: 0; pointer-events: none; transition: opacity 0.5s ease; }
+    .chat.active { opacity: 1; pointer-events: auto; }
+
+    .chat-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; background: rgba(10, 10, 18, 0.6); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-bottom: 1px solid rgba(201, 160, 160, 0.12); flex: 0 0 auto; gap: 12px; }
+    .chat-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .chat-brand .moon-mini { width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(135deg, #f0d6c4, #c9a0a0 60%, #7a5a5a); box-shadow: 0 0 12px rgba(201, 160, 160, 0.5), inset -3px -3px 6px rgba(0,0,0,0.3); position: relative; flex: 0 0 auto; }
+    .chat-brand .moon-mini::after { content: ""; position: absolute; top: 14%; left: 24%; width: 56%; height: 56%; border-radius: 50%; background: #0a0a14; }
+    .chat-brand .name { font-size: 14px; font-weight: 600; color: #f0f0f5; }
+    .chat-brand .sub { font-size: 11px; color: #808090; }
+    .mode-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: rgba(99, 102, 241, 0.12); border: 1px solid rgba(99, 102, 241, 0.3); color: #a5b4fc; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; flex: 0 0 auto; }
+    .mode-pill.news { background: rgba(236, 72, 153, 0.12); border-color: rgba(236, 72, 153, 0.3); color: #f9a8d4; }
+    .chat-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+    .icon-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06); background: rgba(255,255,255,0.03); color: #9090a0; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.15s, color 0.15s, border-color 0.15s; }
+    .icon-btn:hover { background: rgba(201, 160, 160, 0.08); color: #c9a0a0; border-color: rgba(201, 160, 160, 0.3); }
+    .icon-btn.danger:hover { background: rgba(239, 68, 68, 0.1); color: #fca5a5; border-color: rgba(239, 68, 68, 0.3); }
+    .icon-btn svg { width: 16px; height: 16px; }
+    .icon-btn.active { background: rgba(201, 160, 160, 0.12); color: #c9a0a0; border-color: rgba(201, 160, 160, 0.4); }
+
+    .messages { flex: 1 1 auto; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; scrollbar-width: thin; scrollbar-color: rgba(201, 160, 160, 0.3) transparent; }
+    .messages::-webkit-scrollbar { width: 6px; }
+    .messages::-webkit-scrollbar-thumb { background: rgba(201, 160, 160, 0.3); border-radius: 3px; }
+    .messages::-webkit-scrollbar-track { background: transparent; }
+
+    .msg { max-width: 78%; padding: 12px 16px; border-radius: 14px; font-size: 14px; line-height: 1.5; user-select: text; word-wrap: break-word; }
+    .msg.user { align-self: flex-end; background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); color: #fff; border-bottom-right-radius: 4px; box-shadow: 0 4px 16px rgba(99, 102, 241, 0.3); }
+    .msg.assistant { align-self: flex-start; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); color: #e0e0e8; border-bottom-left-radius: 4px; }
+    .msg.system { align-self: center; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.08); color: #808090; font-size: 12px; font-style: italic; max-width: 90%; }
+    .msg .role { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.6; margin-bottom: 4px; display: block; }
+    .msg pre { background: rgba(0,0,0,0.3); padding: 8px 10px; border-radius: 6px; overflow-x: auto; font-size: 12px; margin: 6px 0 0; }
+    .msg code { font-family: "SF Mono", Menlo, Consolas, monospace; }
+    .msg a { color: #a5b4fc; text-decoration: none; border-bottom: 1px dashed rgba(165, 180, 252, 0.5); }
+    .msg a:hover { color: #c7d2fe; border-bottom-color: rgba(199, 210, 254, 0.8); }
+    .msg.streaming::after { content: "▍"; margin-left: 2px; color: #c9a0a0; animation: blink 0.9s steps(1) infinite; }
+
+    .typing { display: flex; gap: 4px; padding: 4px 0; }
+    .typing span { width: 6px; height: 6px; border-radius: 50%; background: #c9a0a0; animation: typing-bounce 1.2s ease-in-out infinite; }
+    .typing span:nth-child(2) { animation-delay: 0.15s; }
+    .typing span:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes typing-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-4px); opacity: 1; } }
+
+    /* News card */
+    .news-card { align-self: stretch; max-width: 100%; padding: 14px 16px; background: rgba(236, 72, 153, 0.06); border: 1px solid rgba(236, 72, 153, 0.18); border-radius: 12px; cursor: pointer; transition: background 0.15s, border-color 0.15s, transform 0.15s; }
+    .news-card:hover { background: rgba(236, 72, 153, 0.12); border-color: rgba(236, 72, 153, 0.4); transform: translateY(-1px); }
+    .news-card .news-title { font-size: 14px; font-weight: 600; color: #f9a8d4; margin-bottom: 4px; }
+    .news-card .news-url { font-size: 11px; color: #707080; word-break: break-all; }
+    .news-empty { align-self: center; font-size: 12px; color: #606070; font-style: italic; padding: 8px 0; }
+
+    .composer { flex: 0 0 auto; padding: 12px 16px 16px; background: rgba(10, 10, 18, 0.6); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-top: 1px solid rgba(201, 160, 160, 0.12); }
+    .composer-row { display: flex; gap: 10px; align-items: flex-end; background: rgba(255,255,255,0.04); border: 1px solid rgba(201, 160, 160, 0.18); border-radius: 14px; padding: 10px 12px; transition: border-color 0.2s, box-shadow 0.2s; }
+    .composer-row:focus-within { border-color: rgba(201, 160, 160, 0.5); box-shadow: 0 0 0 3px rgba(201, 160, 160, 0.12), 0 0 24px rgba(201, 160, 160, 0.15); }
+    .composer textarea { flex: 1; min-height: 24px; max-height: 160px; border: none; outline: none; resize: none; background: transparent; color: #f0f0f5; font-family: inherit; font-size: 14px; line-height: 1.5; padding: 4px 4px; }
+    .composer textarea::placeholder { color: #606070; }
+    .composer .send { width: 36px; height: 36px; border-radius: 10px; border: none; cursor: pointer; background: linear-gradient(135deg, #c9a0a0, #a87a7a); color: #050509; display: flex; align-items: center; justify-content: center; transition: transform 0.15s, filter 0.15s, opacity 0.15s; flex: 0 0 auto; }
+    .composer .send:hover:not(:disabled) { transform: scale(1.05); filter: brightness(1.1); }
+    .composer .send:disabled { opacity: 0.4; cursor: not-allowed; }
+    .composer .send svg { width: 16px; height: 16px; }
+    .composer-hint { font-size: 11px; color: #606070; margin-top: 8px; padding: 0 4px; display: flex; justify-content: space-between; }
+    .composer-hint .key { color: #808090; }
+    .composer-hint .key b { color: #c9a0a0; font-weight: 500; }
+
+    .error-banner { margin: 0 16px 10px; padding: 10px 14px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 10px; color: #fca5a5; font-size: 12px; }
+
+    /* ----- Settings modal ----- */
+    .modal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 100; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.25s; }
+    .modal-back.active { opacity: 1; pointer-events: auto; }
+    .modal { width: 92%; max-width: 520px; padding: 28px; background: rgba(20, 20, 30, 0.9); border: 1px solid rgba(201, 160, 160, 0.25); border-radius: 18px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 60px rgba(201, 160, 160, 0.1); transform: scale(0.96); transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
+    .modal-back.active .modal { transform: scale(1); }
+    .modal h2 { margin: 0 0 6px; font-size: 18px; font-weight: 600; color: #f0f0f5; }
+    .modal .modal-sub { margin: 0 0 18px; font-size: 13px; color: #9090a0; }
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #808090; margin-bottom: 6px; }
+    .field label .badge { display: inline-block; margin-left: 6px; padding: 2px 6px; border-radius: 999px; font-size: 9px; background: rgba(74, 222, 128, 0.15); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); text-transform: none; }
+    .field label .badge.missing { background: rgba(239, 68, 68, 0.1); color: #fca5a5; border-color: rgba(239, 68, 68, 0.3); }
+    .field input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.08); background: rgba(255, 255, 255, 0.03); color: #f0f0f5; font-family: inherit; font-size: 13px; outline: none; transition: border-color 0.15s, box-shadow 0.15s; }
+    .field input:focus { border-color: rgba(201, 160, 160, 0.4); box-shadow: 0 0 0 3px rgba(201, 160, 160, 0.1); }
+    .field .hint { font-size: 11px; color: #606070; margin-top: 4px; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+    .btn { padding: 10px 18px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); color: #d0d0d8; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+    .btn:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); }
+    .btn.primary { background: linear-gradient(135deg, #c9a0a0, #a87a7a); color: #050509; border-color: transparent; }
+    .btn.primary:hover { filter: brightness(1.1); }
   </style>
 </head>
 <body>
-  <div id="loading">
-    <div class="brand">Luna Agent</div>
-    <div class="sub">Loading desktop app...</div>
+  <div class="bg" aria-hidden="true">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+    <div class="orb orb-4"></div>
   </div>
-  <script type="module" src="../src/main.ts"></script>
+  <div class="stars" id="stars" aria-hidden="true"></div>
+
+  <!-- Chat view -->
+  <div class="chat" id="chat">
+    <div class="chat-header">
+      <div class="chat-brand">
+        <div class="moon-mini"></div>
+        <div>
+          <div class="name">Luna Agent</div>
+          <div class="sub" id="providerLabel">chat</div>
+        </div>
+      </div>
+      <div id="modePill" class="mode-pill">Chat</div>
+      <div class="chat-actions">
+        <button class="icon-btn" id="newsToggle" title="Toggle news search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 002-2V4a2 2 0 00-2-2H8a2 2 0 00-2 2v16a2 2 0 002 2z"/><path d="M18 14h-8M15 18h-5M10 6h8v4h-8z"/></svg>
+        </button>
+        <button class="icon-btn" id="settingsBtn" title="Settings (API keys)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H2a2 2 0 010-4h.09A1.65 1.65 0 003.6 8a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H8a1.65 1.65 0 001-1.51V2a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H22a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        </button>
+        <button class="icon-btn danger" id="clearBtn" title="Clear chat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14H7L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="messages" id="messages"></div>
+    <div id="errorSlot"></div>
+    <div class="composer">
+      <div class="composer-row">
+        <textarea id="input" placeholder="Ask Luna anything…  (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
+        <button class="send" id="sendBtn" title="Send (Enter)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+      <div class="composer-hint">
+        <span id="hintText">Sends via local Rust backend → streaming AI</span>
+        <span class="key">Enter to send · <b>Shift+Enter</b> for newline</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Splash stage -->
+  <div class="stage" id="stage">
+    <div class="loading-content">
+      <div class="logo">
+        <div class="orbit"></div>
+        <div class="moon"></div>
+      </div>
+      <div class="title">Luna Agent</div>
+      <div class="dots" aria-hidden="true">
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+      </div>
+      <div class="status">
+        <span class="status-text" id="status">Initializing</span>
+        <span class="cursor" aria-hidden="true"></span>
+      </div>
+      <div class="progress" aria-hidden="true">
+        <div class="progress-bar"></div>
+      </div>
+    </div>
+
+    <div class="ready-content">
+      <div class="ready-card">
+        <div class="ready-badge"><div class="ready-pulse"></div>Ready</div>
+        <div class="ready-title">Luna Agent is online</div>
+        <div class="ready-sub">All systems initialized · awaiting your command</div>
+        <div class="ready-list">
+          <div class="ready-item">Rust backend · Tauri commands ready (chat, workspace, vision)</div>
+          <div class="ready-item">WebView2 · offline-first · native window</div>
+          <div class="ready-item">Streaming AI · news search · secure keyring</div>
+        </div>
+        <button class="start-btn" id="startBtn">
+          Open Luna Agent
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings modal -->
+  <div class="modal-back" id="settingsModal">
+    <div class="modal" role="dialog" aria-modal="true">
+      <h2>API Keys</h2>
+      <p class="modal-sub">Stored in Windows Credential Manager via Rust keyring. Never leaves your machine.</p>
+
+      <div class="field">
+        <label>
+          Anthropic (for streaming chat)
+          <span class="badge" id="badge-anthropic">checking…</span>
+        </label>
+        <input type="password" id="key-anthropic" placeholder="sk-ant-… (leave blank to keep current)">
+        <div class="hint">Used by <code>ai_chat_stream</code> · Claude 3.5 Sonnet default</div>
+      </div>
+
+      <div class="field">
+        <label>
+          MiniMax
+          <span class="badge" id="badge-minimax">checking…</span>
+        </label>
+        <input type="password" id="key-minimax" placeholder="minimax key (leave blank to keep current)">
+        <div class="hint">Used by <code>call_minimax</code> · fallback if Anthropic not set</div>
+      </div>
+
+      <div id="settingsError" class="error-banner" style="display:none"></div>
+
+      <div class="modal-actions">
+        <button class="btn" id="settingsCancel">Cancel</button>
+        <button class="btn primary" id="settingsSave">Save keys</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ----- Starfield ----- */
+    (function makeStars() {
+      const host = document.getElementById("stars");
+      const n = 36;
+      const frag = document.createDocumentFragment();
+      for (let i = 0; i < n; i++) {
+        const s = document.createElement("div");
+        s.className = "star";
+        s.style.top = Math.random() * 100 + "%";
+        s.style.left = Math.random() * 100 + "%";
+        s.style.animationDelay = (-Math.random() * 3) + "s";
+        s.style.opacity = 0.2 + Math.random() * 0.5;
+        const sz = 1 + Math.random() * 2;
+        s.style.width = sz + "px";
+        s.style.height = sz + "px";
+        frag.appendChild(s);
+      }
+      host.appendChild(frag);
+    })();
+
+    /* ----- Tauri bridge ----- */
+    const tauri = window.__TAURI__ || {};
+    function getInvoke() {
+      const t = window.__TAURI__ || {};
+      return (t.core && t.core.invoke) || t.invoke || (t.tauri && t.tauri.invoke);
+    }
+    function getEvent() {
+      const t = window.__TAURI__ || {};
+      return t.event || {};
+    }
+    async function tauriInvoke(cmd, args) {
+      const inv = getInvoke();
+      if (typeof inv !== "function") {
+        throw new Error("Tauri bridge not available — open this through the desktop app, not a browser.");
+      }
+      return await inv(cmd, args);
+    }
+    async function tauriListen(eventName, handler) {
+      const ev = getEvent();
+      if (ev.listen) return await ev.listen(eventName, handler);
+      if (ev.Event && ev.Event.listen) return await ev.Event.listen(eventName, handler);
+      throw new Error("Tauri event API not available.");
+    }
+
+    /* ----- Splash ----- */
+    const statusMessages = ["Initializing", "Loading knowledge base", "Connecting to backend", "Preparing interface"];
+    const statusEl = document.getElementById("status");
+    let idx = 0;
+    function rotate() {
+      statusEl.style.opacity = "0";
+      setTimeout(function () {
+        idx = (idx + 1) % statusMessages.length;
+        statusEl.textContent = statusMessages[idx];
+        statusEl.style.opacity = "1";
+      }, 180);
+    }
+    setInterval(rotate, 1700);
+    setTimeout(function () { document.getElementById("stage").classList.add("ready"); }, 4800);
+
+    document.getElementById("startBtn").addEventListener("click", function () {
+      const stage = document.getElementById("stage");
+      const chat = document.getElementById("chat");
+      stage.classList.add("dismissed");
+      setTimeout(function () { chat.classList.add("active"); }, 220);
+      setTimeout(function () {
+        stage.style.display = "none";
+        document.getElementById("input").focus();
+        checkProvider();
+      }, 700);
+    });
+
+    /* ----- Chat state ----- */
+    const messagesEl = document.getElementById("messages");
+    const inputEl = document.getElementById("input");
+    const sendBtn = document.getElementById("sendBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const newsToggle = document.getElementById("newsToggle");
+    const settingsBtn = document.getElementById("settingsBtn");
+    const settingsModal = document.getElementById("settingsModal");
+    const errorSlot = document.getElementById("errorSlot");
+    const modePill = document.getElementById("modePill");
+    const providerLabel = document.getElementById("providerLabel");
+    const hintText = document.getElementById("hintText");
+
+    const history = [];
+    let mode = "chat"; // "chat" | "news"
+    let busy = false;
+    let activeStreamMsg = null; // .msg.assistant currently receiving chunks
+
+    function escHtml(s) {
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+      });
+    }
+    function linkify(text) {
+      const escaped = escHtml(text);
+      return escaped.replace(/\bhttps?:\/\/[^\s<]+/g, function (m) {
+        return '<a href="' + m + '" data-url="' + m + '">' + m + '</a>';
+      });
+    }
+    function renderMarkdown(t) {
+      let html = escHtml(t);
+      html = html.replace(/```([\s\S]*?)```/g, function (_, code) { return "<pre><code>" + code + "</code></pre>"; });
+      html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+      // simple URL linkify after escaping
+      html = html.replace(/\bhttps?:\/\/[^\s<"]+/g, function (m) {
+        return '<a href="' + m + '" data-url="' + m + '">' + m + '</a>';
+      });
+      html = html.replace(/\n/g, "<br>");
+      return html;
+    }
+    function scrollToBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
+    function addMessage(role, text) {
+      const wrap = document.createElement("div");
+      wrap.className = "msg " + role;
+      const roleLabel = role === "user" ? "You" : role === "assistant" ? "Luna" : "System";
+      wrap.innerHTML = '<span class="role">' + roleLabel + '</span><div class="body"></div>';
+      wrap.querySelector(".body").innerHTML = renderMarkdown(text);
+      messagesEl.appendChild(wrap);
+      scrollToBottom();
+      return wrap;
+    }
+    function addTyping() {
+      const wrap = document.createElement("div");
+      wrap.className = "msg assistant typing-msg";
+      wrap.innerHTML = '<span class="role">Luna</span><div class="typing"><span></span><span></span><span></span></div>';
+      messagesEl.appendChild(wrap);
+      scrollToBottom();
+      return wrap;
+    }
+    function showError(msg) {
+      errorSlot.innerHTML = '<div class="error-banner">' + escHtml(msg) + '</div>';
+      setTimeout(function () { errorSlot.innerHTML = ""; }, 8000);
+    }
+
+    // Click handler for links in messages
+    messagesEl.addEventListener("click", function (e) {
+      const a = e.target.closest && e.target.closest("a[data-url]");
+      if (!a) return;
+      e.preventDefault();
+      const url = a.getAttribute("data-url");
+      tauriInvoke("open_url", { url }).catch(function (err) { showError("open_url: " + err); });
+    });
+
+    addMessage("system", "Welcome. Pick a key in Settings (⚙) for streaming AI, or use Chat / News to start. If only MiniMax is set, chat falls back to it.");
+
+    /* ----- Streaming listeners (registered once) ----- */
+    let unlistenChunk = null, unlistenDone = null;
+    async function setupStreamListeners() {
+      try {
+        unlistenChunk = await tauriListen("ai_chunk", function (e) {
+          if (activeStreamMsg) {
+            const body = activeStreamMsg.querySelector(".body");
+            // append plain text node, then re-render markdown on the full accumulated text? simpler: keep raw buffer
+            activeStreamMsg._raw = (activeStreamMsg._raw || "") + e.payload;
+            body.innerHTML = renderMarkdown(activeStreamMsg._raw);
+            scrollToBottom();
+          }
+        });
+        unlistenDone = await tauriListen("ai_done", function () {
+          if (activeStreamMsg) {
+            activeStreamMsg.classList.remove("streaming");
+            const txt = activeStreamMsg._raw || "";
+            history.push({ role: "assistant", content: txt });
+            activeStreamMsg = null;
+            busy = false;
+            sendBtn.disabled = false;
+            inputEl.focus();
+          }
+        });
+      } catch (err) {
+        // listen failed — non-fatal
+      }
+    }
+    setupStreamListeners();
+
+    /* ----- Provider detection ----- */
+    async function checkProvider() {
+      const [ant, mm] = await Promise.all([
+        tauriInvoke("get_api_key", { provider: "anthropic" }).catch(function () { return null; }),
+        tauriInvoke("get_api_key", { provider: "minimax" }).catch(function () { return null; })
+      ]);
+      const label = ant ? "anthropic" : (mm ? "minimax (fallback)" : "no key");
+      providerLabel.textContent = label;
+      return { anthropic: ant, minimax: mm };
+    }
+
+    /* ----- Settings modal ----- */
+    settingsBtn.addEventListener("click", async function () {
+      settingsModal.classList.add("active");
+      document.getElementById("settingsError").style.display = "none";
+      const { anthropic, minimax } = await checkProvider();
+      const b1 = document.getElementById("badge-anthropic");
+      const b2 = document.getElementById("badge-minimax");
+      b1.textContent = anthropic ? "set" : "missing";
+      b1.className = "badge" + (anthropic ? "" : " missing");
+      b2.textContent = minimax ? "set" : "missing";
+      b2.className = "badge" + (minimax ? "" : " missing");
+    });
+    document.getElementById("settingsCancel").addEventListener("click", function () {
+      settingsModal.classList.remove("active");
+    });
+    settingsModal.addEventListener("click", function (e) {
+      if (e.target === settingsModal) settingsModal.classList.remove("active");
+    });
+    document.getElementById("settingsSave").addEventListener("click", async function () {
+      const a = document.getElementById("key-anthropic").value.trim();
+      const m = document.getElementById("key-minimax").value.trim();
+      const errEl = document.getElementById("settingsError");
+      errEl.style.display = "none";
+      try {
+        if (a) await tauriInvoke("set_api_key", { provider: "anthropic", key: a });
+        if (m) await tauriInvoke("set_api_key", { provider: "minimax", key: m });
+        document.getElementById("key-anthropic").value = "";
+        document.getElementById("key-minimax").value = "";
+        await checkProvider();
+        settingsModal.classList.remove("active");
+      } catch (err) {
+        errEl.textContent = "Save failed: " + (err && err.message || err);
+        errEl.style.display = "block";
+      }
+    });
+
+    /* ----- Mode toggle ----- */
+    function setMode(newMode) {
+      mode = newMode;
+      if (mode === "news") {
+        modePill.textContent = "News";
+        modePill.classList.add("news");
+        newsToggle.classList.add("active");
+        inputEl.placeholder = "Search the news… (Enter to search)";
+        hintText.textContent = "DuckDuckGo Instant Answer · click a card to open in browser";
+        providerLabel.textContent = "news";
+      } else {
+        modePill.textContent = "Chat";
+        modePill.classList.remove("news");
+        newsToggle.classList.remove("active");
+        inputEl.placeholder = "Ask Luna anything…  (Enter to send, Shift+Enter for newline)";
+        hintText.textContent = "Sends via local Rust backend → streaming AI";
+        checkProvider().then(function (p) {
+          providerLabel.textContent = p.anthropic ? "anthropic" : (p.minimax ? "minimax (fallback)" : "no key");
+        });
+      }
+    }
+    newsToggle.addEventListener("click", function () { setMode(mode === "news" ? "chat" : "news"); inputEl.focus(); });
+
+    /* ----- Send / clear ----- */
+    async function send() {
+      const text = inputEl.value.trim();
+      if (!text || busy) return;
+      inputEl.value = "";
+      inputEl.style.height = "auto";
+      busy = true;
+      sendBtn.disabled = true;
+
+      addMessage("user", text);
+      errorSlot.innerHTML = "";
+
+      try {
+        if (mode === "news") {
+          await doNews(text);
+        } else {
+          await doChat(text);
+        }
+      } catch (e) {
+        showError((e && e.message) || String(e));
+      } finally {
+        busy = false;
+        sendBtn.disabled = false;
+        inputEl.focus();
+      }
+    }
+
+    async function doChat(text) {
+      history.push({ role: "user", content: text });
+      const keys = await checkProvider();
+      if (keys.anthropic) {
+        // streaming via Tauri events
+        activeStreamMsg = addMessage("assistant", "");
+        activeStreamMsg.classList.add("streaming");
+        activeStreamMsg._raw = "";
+        try {
+          await tauriInvoke("ai_chat_stream", {
+            req: { messages: history }
+          });
+        } catch (e) {
+          activeStreamMsg.remove();
+          activeStreamMsg = null;
+          history.pop();
+          throw e;
+        }
+        // busy/unlisten handled by ai_done event
+      } else if (keys.minimax) {
+        // non-streaming fallback
+        const typingEl = addTyping();
+        try {
+          const reply = await tauriInvoke("call_minimax", { messages: history });
+          typingEl.remove();
+          const text2 = (reply && String(reply).trim()) || "(empty reply)";
+          addMessage("assistant", text2);
+          history.push({ role: "assistant", content: text2 });
+        } catch (e) {
+          typingEl.remove();
+          history.pop();
+          throw e;
+        }
+      } else {
+        throw new Error("No API key set. Open Settings (⚙) to add Anthropic or MiniMax key.");
+      }
+    }
+
+    async function doNews(text) {
+      const typingEl = addTyping();
+      try {
+        const res = await tauriInvoke("search_news", { query: text, numResults: 5 });
+        typingEl.remove();
+        const results = (res && res.results) || [];
+        if (results.length === 0) {
+          addMessage("assistant", "No news found for: " + text);
+        } else {
+          for (const r of results) {
+            const card = document.createElement("div");
+            card.className = "news-card";
+            card.dataset.url = r.url || "";
+            card.innerHTML = '<div class="news-title"></div><div class="news-url"></div>';
+            card.querySelector(".news-title").textContent = r.title || "(no title)";
+            card.querySelector(".news-url").textContent = r.url || r.source || "";
+            card.addEventListener("click", function () {
+              if (card.dataset.url) {
+                tauriInvoke("open_url", { url: card.dataset.url }).catch(function (e) { showError("open_url: " + e); });
+              }
+            });
+            messagesEl.appendChild(card);
+          }
+          scrollToBottom();
+        }
+      } catch (e) {
+        typingEl.remove();
+        throw e;
+      }
+    }
+
+    sendBtn.addEventListener("click", send);
+    inputEl.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+    inputEl.addEventListener("input", function () {
+      inputEl.style.height = "auto";
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + "px";
+    });
+    clearBtn.addEventListener("click", function () {
+      messagesEl.innerHTML = "";
+      history.length = 0;
+      addMessage("system", "Chat cleared.");
+    });
+  </script>
 </body>
 </html>

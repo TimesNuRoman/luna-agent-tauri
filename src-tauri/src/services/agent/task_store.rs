@@ -577,6 +577,7 @@ mod tests {
                 output_tokens: 50,
                 ..Default::default()
             },
+            persona_payload: None,
         };
         store.write_result("t1", &r).unwrap();
         let read = store.read_result("t1").unwrap().unwrap();

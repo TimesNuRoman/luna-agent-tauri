@@ -81,6 +81,34 @@ impl MinimaxMessage {
     pub fn user_parts(parts: Vec<ContentPart>) -> Self {
         Self::User { content: UserContent::Parts(parts) }
     }
+
+    /// Convenience constructor for an assistant message that issued
+    /// one or more tool calls. `content` is `None` when the model
+    /// emitted only tool calls (no accompanying text); otherwise the
+    /// model's text reply.
+    ///
+    /// Added for backward-compat with the `morningstar` supervisor
+    /// (which uses this style). Phase Z0+ Azazel and the code
+    /// supervisor use the `Assistant { ... }` variant directly.
+    pub fn assistant_with_tools(
+        content: Option<String>,
+        tool_calls: Vec<MinimaxToolCall>,
+    ) -> Self {
+        Self::Assistant {
+            content: content.filter(|s| !s.is_empty()),
+            tool_calls,
+        }
+    }
+
+    /// Convenience constructor for a `tool` result message. Empty
+    /// `content` is preserved as-is (the model may rely on the empty
+    /// string for some tools).
+    pub fn tool_result(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self::Tool {
+            tool_call_id: tool_call_id.into(),
+            content: content.into(),
+        }
+    }
 }
 
 /// `User` message content. Untagged so a wire-form string (`"hello"`)
