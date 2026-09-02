@@ -13,6 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
+        "label": "main",
         "title": "Luna Agent",
         "width": 1200,
         "height": 800,
@@ -21,12 +22,36 @@
         "resizable": true,
         "fullscreen": false,
         "center": true,
-        "decorations": true,
+        "decorations": false,
         "transparent": false
+      },
+      {
+        "label": "daimonion-overlay",
+        "title": "Daimonion",
+        "url": "/#/overlay",
+        "width": 320,
+        "height": 200,
+        "minWidth": 240,
+        "minHeight": 120,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "visible": false
       }
     ],
+    "trayIcon": {
+      "id": "main-tray",
+      "iconPath": "icons/32x32.png",
+      "iconAsTemplate": false,
+      "tooltip": "Luna Agent"
+    },
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; img-src 'self' data: asset: https://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://*.anthropic.com https://*.openai.com https://*.openrouter.ai https://*.minimaxi.com https://api.minimax.io https://*.telegram.org https://duckduckgo.com https://api.minimax.chat"
     }
   },
   "bundle": {

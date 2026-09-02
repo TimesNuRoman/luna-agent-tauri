@@ -4,6 +4,7 @@
     taskList,
     taskGet,
     taskDelete,
+    healProject,
     statusLabel,
     formatTokens,
     type TaskSummary,
@@ -31,6 +32,9 @@
   let selectedTask: Task | null = null;
   let selectedLoading = false;
   let refreshInterval: ReturnType<typeof setInterval> | null = null;
+  /// True while we're spawning a heal task. Disables the
+  /// "🌟 Heal" button to prevent double-clicks.
+  let healing = false;
 
   // Filters
   let activeFilter: 'all' | TaskStatus = 'all';
@@ -75,6 +79,28 @@
     }
   }
 
+  /**
+   * One-click heal of the current workspace. Spawns a MorningStar
+   * (Lucifer) task. After the spawn we refresh the list so the
+   * new task appears at the top. The runner then drives the fix
+   * loop; we don't await its completion here.
+   */
+  async function triggerHeal() {
+    if (healing) return;
+    healing = true;
+    try {
+      await healProject('manual');
+      // Give the runner a moment to persist the new task, then
+      // refresh so it shows up at the top of the list.
+      await new Promise((r) => setTimeout(r, 200));
+      await refresh();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      healing = false;
+    }
+  }
+
   onMount(() => {
     refresh();
     // Refresh every 5s for the Running / Pending pills. Cheap RPC.
@@ -115,6 +141,14 @@
       {/if}
     </div>
     <div class="ts-header-actions">
+      <button
+        class="ts-heal"
+        type="button"
+        on:click={triggerHeal}
+        disabled={healing}
+        title="Запустить Люцифера — healer починит проект"
+        aria-label="Heal project"
+      >{healing ? '…' : '🌟'}</button>
       <button
         class="ts-switch"
         type="button"
@@ -256,6 +290,25 @@
     margin-right: 6px;
   }
   .ts-header-actions { display: flex; gap: 2px; }
+  .ts-heal {
+    border: none;
+    background: transparent;
+    color: var(--text-muted, #6b6b70);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 16px;
+    line-height: 1;
+    transition: background 0.15s, color 0.15s;
+  }
+  .ts-heal:hover:not(:disabled) {
+    background: rgba(255, 215, 0, 0.12);
+    color: #f5c518;
+  }
+  .ts-heal:disabled {
+    opacity: 0.5;
+    cursor: wait;
+  }
   .ts-switch {
     border: none;
     background: transparent;

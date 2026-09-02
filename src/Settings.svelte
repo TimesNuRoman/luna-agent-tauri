@@ -48,6 +48,37 @@
   let interestsText = 'AI, Rust, Tauri, Luna Agent';
   let interestsSaved = '';
 
+  // ---- Daimonion VAD (Phase D1) ----
+  // Mirrors `services::daimonion::types::VadConfig`. Persisted to
+  // localStorage; the D1+ supervisor reads it at startup.
+  const VAD_STORAGE_KEY = 'luna.daimonion.vad';
+  let vad = {
+    energy_threshold: 0.015,
+    start_hold_frames: 3,
+    end_hold_frames: 80,
+    frame_ms: 10,
+  };
+  function loadVad(): void {
+    try {
+      const raw = localStorage.getItem(VAD_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed === 'object' && parsed !== null) {
+          vad = { ...vad, ...parsed };
+        }
+      }
+    } catch (e) {
+      /* ignore corrupt storage */
+    }
+  }
+  function saveVad(): void {
+    try {
+      localStorage.setItem(VAD_STORAGE_KEY, JSON.stringify(vad));
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
   const SECTIONS: { id: SectionId; label: string; icon: string; desc: string; keywords: string[] }[] = [
     {
       id: 'api',
@@ -197,9 +228,13 @@
       const savedInterests = localStorage.getItem(INTERESTS_STORAGE_KEY);
       if (savedInterests !== null) interestsText = savedInterests;
     } catch { /* ignore */ }
+    loadVad();
     refreshKeyStatus().catch(() => { /* non-fatal */ });
     refreshShellList().catch(() => { /* non-fatal */ });
   });
+
+  // Auto-save VAD changes.
+  $: if (typeof localStorage !== 'undefined') saveVad();
 
   // Refresh the shell list when the user actually opens the section
   // — picks up edits made in another window or by the bot.
@@ -506,8 +541,8 @@
       {#if activeSection === 'voice'}
         <section class="block">
           <div class="row-head">
-            <h3>🎙 Голосовой ввод</h3>
-            <span class="badge neutral">в разработке</span>
+            <h3>🎙 Голосовой ввод (Whisper)</h3>
+            <span class="badge neutral">локальный fallback</span>
           </div>
           <p class="hint-text">
             Whisper-модели управляются прямо в чате — нажми 🎙 в композере, и если модели нет,
@@ -518,6 +553,54 @@
             <li><b>Модели</b>: <code>base</code> ≈ 140 МБ, <code>small</code> ≈ 460 МБ — рекомендую <code>base</code></li>
             <li><b>Где хранятся</b>: <code>%APPDATA%\com.luna.agent\whisper-models\</code></li>
             <li><b>Текущая ошибка</b> (если была): <code>stt:allow-list-models</code> — уже добавлено в capabilities</li>
+          </ul>
+        </section>
+
+        <section class="block">
+          <div class="row-head">
+            <h3>🔮 Daimonion — голосовой ассистент</h3>
+            <span class="badge ok">D0+ готов</span>
+          </div>
+          <p class="hint-text">
+            Daimonion (Δαιμόνιον) — голос-первый мультимодальный ассистент
+            из тёмной линейки Luna (рядом с Lucifer / Azazel / Raziel /
+            Mephistopheles). STT и TTS идут через <b>MiniMax</b> (нужна
+            активная подписка Ultra и MiniMax-ключ в API Keys).
+            Push-to-talk в панели Daimonion — <kbd>Space</kbd>.
+          </p>
+
+          <div class="vad-grid">
+            <label>
+              <span>Energy threshold</span>
+              <input type="number" min="0.001" max="0.5" step="0.001"
+                bind:value={vad.energy_threshold} />
+              <small>0.001–0.5. Ниже = чувствительнее.</small>
+            </label>
+            <label>
+              <span>Start hold (frames)</span>
+              <input type="number" min="1" max="50" step="1"
+                bind:value={vad.start_hold_frames} />
+              <small>Сколько фреймов подряд выше порога до старта речи.</small>
+            </label>
+            <label>
+              <span>End hold (frames)</span>
+              <input type="number" min="10" max="500" step="1"
+                bind:value={vad.end_hold_frames} />
+              <small>Тишина (мс = frames × 10) до конца фразы.</small>
+            </label>
+            <label>
+              <span>Frame (ms)</span>
+              <input type="number" min="5" max="50" step="1"
+                bind:value={vad.frame_ms} />
+              <small>Размер фрейма для VAD-математики.</small>
+            </label>
+          </div>
+
+          <ul class="info-list">
+            <li><b>Pipeline</b>: cpal mic → VAD → MiniMax ASR → MiniMax-M3 → MiniMax T2A (speech-02) → cpal</li>
+            <li><b>Latency budget</b>: ≤ 1.5 с p50, ≤ 2.5 с p95 end-to-end</li>
+            <li><b>Vision</b>: модель сама решает, когда смотреть экран (D2+); не always-on</li>
+            <li><b>Read-only</b>: Daimonion смотрит и говорит, не правит файлы</li>
           </ul>
         </section>
       {/if}
@@ -1001,6 +1084,30 @@
   .info-list code {
     background: var(--bg-input); border: 1px solid var(--border);
     border-radius: 3px; padding: 1px 5px; font-size: 11px; color: var(--text);
+  }
+
+  /* Daimonion VAD settings (Phase D1) */
+  .vad-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px 16px;
+    margin: 12px 0;
+  }
+  .vad-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+  }
+  .vad-grid label span { color: var(--text); font-weight: 500; }
+  .vad-grid label small { color: var(--text-muted); font-size: 10px; }
+  .vad-grid input {
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-input);
+    color: var(--text);
+    font: inherit;
   }
   .info-list kbd {
     display: inline-block; padding: 0 5px;

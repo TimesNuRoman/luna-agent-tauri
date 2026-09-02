@@ -42,6 +42,10 @@ function events(): TauriEvent {
 
 // ---------- Types (mirror Rust) ----------
 
+// Re-export the runtime accessors so other modules can do
+// `import { core, events } from './tauri'` (used by daimonionClient.ts).
+export { core, events };
+
 export type MonitorInfo = {
   id: number;
   name: string;

@@ -70,6 +70,7 @@
   import { saveChat, loadChat, currentChatId, clearAllChats } from './lib/tauri';
   import { apiKeyStatus, refreshKeyStatus } from './lib/keyStore';
   import { safeRenderMarkdown as renderMarkdown } from './lib/markdown';
+  import { mephistoChat, parseDesignSlashCommand } from './lib/designClient';
   import {
     createPlan,
     recordAgentPlan,
@@ -712,13 +713,15 @@
     // M3 (and any future tiered model) charges more once the
     // request exceeds the high-context threshold. Apply the high tier
     // on the portion above the threshold.
-    let inRate = rate.in;
-    let outRate = rate.out;
-    if (rate.inHigh != null && rate.highThreshold != null && inTokens > rate.highThreshold) {
-      const below = rate.highThreshold;
+    // Pre-existing bug fix: was using `rate` (undefined) — should be
+    // `tier` (the lookup result from COST_PER_M_TOKENS).
+    let inRate = tier.in;
+    let outRate = tier.out;
+    if (tier.inHigh != null && tier.highThreshold != null && inTokens > tier.highThreshold) {
+      const below = tier.highThreshold;
       const above = inTokens - below;
-      const inCost = (below / 1_000_000) * rate.in + (above / 1_000_000) * rate.inHigh;
-      const outCost = rate.inHigh ? (outTokens / 1_000_000) * rate.outHigh! : (outTokens / 1_000_000) * rate.out;
+      const inCost = (below / 1_000_000) * tier.in + (above / 1_000_000) * tier.inHigh;
+      const outCost = tier.inHigh ? (outTokens / 1_000_000) * tier.outHigh! : (outTokens / 1_000_000) * tier.out;
       return { in: inCost, out: outCost, total: inCost + outCost };
     }
     const inCost = (inTokens / 1_000_000) * inRate;
@@ -2166,6 +2169,63 @@
     inputText = '';
     if (inputEl) inputEl.style.height = 'auto';
     errorBanner = '';
+
+    // ---- Slash command: /azazel <prompt> (autonomous browser-use) ----
+    // Hands the prompt to Azazel (M3 vision-action loop over
+    // chromiumoxide) instead of the chat LLM. The user can then
+    // switch to the Azazel tab to watch the live screenshot +
+    // action timeline.
+    if (/^\/azazel\b/i.test(text)) {
+      const azPrompt = text.replace(/^\/azazel\s*/i, '').trim();
+      if (!azPrompt) {
+        appendMessage('user', '/azazel <prompt> — please describe what you want Azazel to do.');
+        return;
+      }
+      try {
+        const { azazelRun } = await import('./lib/azazel');
+        const id = await azazelRun({ prompt: azPrompt, title: azPrompt.slice(0, 60) });
+        appendMessage(
+          'user',
+          `😈 Azazel task <code>${id}</code> started. Open the Azazel tab to watch.`,
+        );
+      } catch (e) {
+        appendMessage('user', `Failed to start Azazel: ${e}`);
+      }
+      return;
+    }
+
+    // ---- Slash command: /design ... (Mephistopheles) ----
+    const designCmd = parseDesignSlashCommand(text);
+    if (designCmd) {
+      // Build a kind-specific prompt for the persona. The persona
+      // gets the system prompt with Mephisto rules; this gives it
+      // extra structure for the most common shapes.
+      let personaPrompt: string;
+      if (designCmd.kind === 'copy' && designCmd.copyContext) {
+        personaPrompt = `Generate ${designCmd.copyContext} copy. ${designCmd.args}`;
+      } else if (designCmd.kind === 'component') {
+        personaPrompt = `Generate a Svelte 4 component named "${designCmd.args.split(/\s+/)[0] ?? 'Component'}". Intent: ${designCmd.args}`;
+      } else if (designCmd.kind === 'page') {
+        personaPrompt = `Generate a Svelte 4 page named "${designCmd.args.split(/\s+/)[0] ?? 'Page'}". Intent: ${designCmd.args}`;
+      } else if (designCmd.kind === 'app') {
+        personaPrompt = `Generate a Tauri 2 + Svelte 4 app skeleton named "${designCmd.args.split(/\s+/)[0] ?? 'App'}". Intent: ${designCmd.args}`;
+      } else if (designCmd.kind === 'image') {
+        personaPrompt = `Generate an image: ${designCmd.args}`;
+      } else {
+        personaPrompt = designCmd.args;
+      }
+      appendMessage('user', text);
+      try {
+        const taskId = await mephistoChat(personaPrompt, currentChatId ?? undefined);
+        appendMessage('assistant', `🎭 Mephistopheles spawned task \`${taskId.slice(0, 8)}…\`. Open the **Design Studio** sidebar to see live results.`);
+      } catch (e) {
+        const m = (e && (e as Error).message) || String(e);
+        showError(`Mephisto: ${m}`);
+      }
+      inputEl?.focus();
+      return;
+    }
+
     appendMessage('user', text);
     // If a stream is already in flight, the user is "steering" it.
     // Bump the token so the old stream's event handlers stop updating

@@ -8,20 +8,24 @@
   import SelfEvolution from './SelfEvolution.svelte';
   import TasksSidebar from './TasksSidebar.svelte';
   import PlansSidebar from './PlansSidebar.svelte';
+  import DesignStudio from './DesignStudio.svelte';
+  import Daimonion from './Daimonion.svelte';
+  import AzazelPanel from './AzazelPanel.svelte';
   import { appWindow, getTelegramStatus } from './lib/tauri';
   import type { TelegramStatus } from './lib/tauri';
   import { apiKeyStatus, refreshKeyStatus } from './lib/keyStore';
   import type { Plan } from './lib/planStore';
   import { onTaskFinished } from './lib/taskClient';
   import { statusLabel } from './lib/taskClient';
+  import { azazelStore, runningTaskIds } from './lib/stores/azazel';
 
-  type TabId = 'chat' | 'video' | 'memory' | 'settings' | 'three_d' | 'self_evolution';
-  type SidebarMode = 'none' | 'tasks' | 'plans';
+  type TabId = 'chat' | 'video' | 'memory' | 'settings' | 'three_d' | 'self_evolution' | 'daimonion' | 'azazel';
+  type SidebarMode = 'none' | 'tasks' | 'plans' | 'design';
   let activeTab: TabId = 'chat';
   // One sidebar slot. Default to `plans` — the new feature we want
   // the user to discover first. The old boolean was renamed to a
-  // 3-state enum so each sidebar (Tasks / Plans) can be the one
-  // visible at a time. A "none" mode hides both.
+  // 3-state enum so each sidebar (Tasks / Plans / Design) can be the
+  // one visible at a time. A "none" mode hides all three.
   let sidebarMode: SidebarMode = 'plans';
 
   /** True while a chat stream is in flight, so PlansSidebar can disable
@@ -183,14 +187,15 @@
   // Tab order used by both the keyboard shortcut (Ctrl/Cmd+1..6,
   // Ctrl+Tab) and the Next/Prev helpers. Kept in one place so adding
   // a new tab is a one-line change.
-  const TAB_ORDER: TabId[] = ['chat', 'video', 'memory', 'three_d', 'self_evolution', 'settings'];
+  const TAB_ORDER: TabId[] = ['chat', 'video', 'memory', 'azazel', 'three_d', 'self_evolution', 'settings'];
   const TAB_HOTKEY: Record<string, TabId> = {
     '1': 'chat',
     '2': 'video',
     '3': 'memory',
-    '4': 'three_d',
-    '5': 'self_evolution',
-    '6': 'settings',
+    '4': 'azazel',
+    '5': 'three_d',
+    '6': 'self_evolution',
+    '7': 'settings',
   };
 
   function nextTab(dir: 1 | -1) {
@@ -296,11 +301,23 @@
         title="Memory (Ctrl+3)">🧠 Memory</button>
       <button
         role="tab"
+        class:on={activeTab === 'azazel'}
+        aria-selected={activeTab === 'azazel'}
+        tabindex={activeTab === 'azazel' ? 0 : -1}
+        on:click={() => switchTo('azazel')}
+        title="Azazel — autonomous browser-use agent (Ctrl+4)">
+        😈 Azazel
+        {#if $runningTaskIds.length > 0}
+          <span class="badge">{$runningTaskIds.length}</span>
+        {/if}
+      </button>
+      <button
+        role="tab"
         class:on={activeTab === 'three_d'}
         aria-selected={activeTab === 'three_d'}
         tabindex={activeTab === 'three_d' ? 0 : -1}
         on:click={() => switchTo('three_d')}
-        title="Luna 3D Thoughts — proprietary editor (Ctrl+4)">💭 3D Thoughts</button>
+        title="Luna 3D Thoughts — proprietary editor (Ctrl+5)">💭 3D Thoughts</button>
       <button
         role="tab"
         class:on={activeTab === 'self_evolution'}
@@ -308,6 +325,13 @@
         tabindex={activeTab === 'self_evolution' ? 0 : -1}
         on:click={() => switchTo('self_evolution')}
         title="Self-evolution (Ctrl+5)">🧬 Self</button>
+      <button
+        role="tab"
+        class:on={activeTab === 'daimonion'}
+        aria-selected={activeTab === 'daimonion'}
+        tabindex={activeTab === 'daimonion' ? 0 : -1}
+        on:click={() => switchTo('daimonion')}
+        title="Daimonion — voice-first assistant (Ctrl+7)">🔮 Daimonion</button>
       <button
         role="tab"
         class:on={activeTab === 'settings'}
@@ -352,6 +376,8 @@
           on:continue={(e) => handleContinuePlan(e.detail.plan)}
           on:switch={handleSwitchSidebar}
         />
+      {:else if sidebarMode === 'design'}
+        <DesignStudio on:switch={handleSwitchSidebar} />
       {/if}
     {/if}
 
@@ -367,6 +393,10 @@
       <ThreeD />
     {:else if activeTab === 'self_evolution'}
       <SelfEvolution />
+    {:else if activeTab === 'daimonion'}
+      <Daimonion />
+    {:else if activeTab === 'azazel'}
+      <AzazelPanel />
     {:else}
       <Settings {theme} {setTheme} />
     {/if}
@@ -377,23 +407,6 @@
 {#if toastMessage}
   <div class="toast" role="status" aria-live="polite">{toastMessage}</div>
 {/if}
-
-<style>
-  .toast {
-    position: fixed;
-    bottom: 18px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: var(--bg-elevated, rgba(20,22,28,0.95));
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 14px;
-    font-size: 13px;
-    z-index: 1000;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
-  }
-</style>
 
 <style>
   /* ---- App-level frame ---- */
@@ -521,6 +534,22 @@
   .win-btn:hover { background: var(--bg-hover); color: var(--text); }
   .win-btn.close:hover { background: var(--danger); color: #ffffff; }
 
+  /* ---- Toast (transient fallback when Notification API is unavailable) ---- */
+  .toast {
+    position: fixed;
+    bottom: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-elevated, rgba(20,22,28,0.95));
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    z-index: 1000;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  }
+
   /* ---- Content ---- */
   .body {
     display: flex;
@@ -537,5 +566,13 @@
   .tab-panel > :global(*) {
     flex: 1;
     min-height: 0;
+  }
+  .badge {
+    background: #b13b3b;
+    color: #fff;
+    font-size: 10px;
+    padding: 0 5px;
+    border-radius: 8px;
+    margin-left: 4px;
   }
 </style>

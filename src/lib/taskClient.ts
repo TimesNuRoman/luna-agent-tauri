@@ -87,6 +87,17 @@ export type CreateTaskInput = {
   maxSteps?: number;
   maxSubagents?: number;
   maxCostTokens?: number;
+  /**
+   * Optional persona id (e.g. `"lucifer"` for the MorningStar
+   * healer, `"raziel"` for the memory curator). When set, the
+   * runner dispatches to that persona's supervisor loop and uses
+   * its system prompt + tool whitelist. Defaults to `null`
+   * (anonymous code-analysis task).
+   *
+   * Phase M3+: used by the "🌟 Heal project" button to spawn a
+   * MorningStar task without going through the chat.
+   */
+  personaId?: string;
 };
 
 // ---------- IPC wrappers ----------
@@ -102,6 +113,37 @@ export async function taskCreate(input: CreateTaskInput): Promise<string> {
     maxSteps: input.maxSteps ?? null,
     maxSubagents: input.maxSubagents ?? null,
     maxCostTokens: input.maxCostTokens ?? null,
+    personaId: input.personaId ?? null,
+  });
+}
+
+/**
+ * One-click heal of the current workspace. Spawns a MorningStar
+ * (Lucifer) task — the healer persona — with the standard heal
+ * prompt. The task appears in `TasksSidebar` and the user can
+ * follow its progress (which files it changed, which commit it
+ * made, or why it escalated).
+ *
+ * Phase M3+: equivalent to clicking the "🌟 Heal project" button
+ * in the Sidebar. Returns the new task id.
+ *
+ * @param reason Optional human-readable prefix for the task title
+ *   (e.g. "auto: build failed", "manual: I broke something"). The
+ *   runner uses this to distinguish auto-triggers from manual
+ *   ones; the UI can use it to decide whether to show "Утренняя
+ *   Звезда" (auto) or "Люцифер" (manual) as the persona name.
+ */
+export async function healProject(reason?: string): Promise<string> {
+  const title = reason
+    ? `Heal project — ${reason}`
+    : 'Heal project';
+  return taskCreate({
+    title,
+    prompt:
+      'Run a heal pass on the current workspace: detect the toolchain, ' +
+      'run the check, fix any build / test errors, and commit the result. ' +
+      'If the build is already green, just report and exit.',
+    personaId: 'lucifer',
   });
 }
 
