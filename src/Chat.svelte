@@ -67,8 +67,9 @@
     type AiFileReadPayload,
     type AiAskUserPayload,
   } from './lib/tauri';
-  import { saveChat, loadChat, currentChatId, clearAllChats } from './lib/tauri';
+  import { saveChat, loadChat, currentChatId, clearAllChats, summariseChat, setFileExcluded } from './lib/tauri';
   import { apiKeyStatus, refreshKeyStatus } from './lib/keyStore';
+  import { setStreaming, clearStreaming } from './lib/chatStreamStore';
   import { safeRenderMarkdown as renderMarkdown } from './lib/markdown';
   import { mephistoChat, parseDesignSlashCommand } from './lib/designClient';
   import {
@@ -79,10 +80,20 @@
     findPlanByTitle,
     buildPlanRunPrompt,
     buildPlanContinuePrompt,
+    toolCallToPlan,
+    planMessageMap,
     type Plan,
     type PlanStep,
     type PlanStepStatus,
   } from './lib/planStore';
+  import {
+    iconChat as IconChat,
+    iconCode as IconCode,
+    iconResearch as IconResearch,
+    iconMedia as IconMedia,
+    iconPlan as IconPlan,
+    iconTrash as IconTrash,
+  } from './lib/icons';
   // Phase UX-1 — chat-side augmentations. Each aug (Memory, Azazel,
   // Video, Design, Daimonion, 3D, Self) registers itself with the
   // registry at import time; Chat renders a small AugCard for every
@@ -99,6 +110,11 @@
   import AugCard from './AugCard.svelte';
   import CredentialManager from './CredentialManager.svelte';
   import { personaFireSlash, onPersonaSlashFired } from './lib/tauri';
+  import {
+    daimonionSynthesize,
+    audioDataUri,
+    type TtsResponse,
+  } from './lib/daimonionClient';
 
   export let providerLabel = 'Luna Agent';
 
@@ -212,7 +228,10 @@
   // `chatId` is null for a fresh conversation; once we save, the backend
   // mints an id and keeps it across restarts. `loadedFromDisk` guards
   // against the auto-intro overwriting a restored chat in onMount.
-  let chatId: string | null = null;
+  // Exposed via bind:chatId so App.svelte can mirror the current
+  // chat id for the sidebar highlight. Chat is the source of truth
+  // (it persists to disk); the parent only reads.
+  export let chatId: string | null = null;
   let loadedFromDisk = false;
   let chatSaveTimer: ReturnType<typeof setTimeout> | null = null;
   let chatSaving = false;
@@ -287,6 +306,25 @@
         videoFrameUrl: m.videoFrameUrl,
         videoFrameKind: m.videoFrameKind,
         videoFrameMeta: m.videoFrameMeta,
+        // Phase UX-3: context-window bookkeeping (excluded from gauge)
+        // and chat-summarisation metadata. Both round-trip through
+        // `chats.json` so a reload restores the user's exclusions and
+        // the summary cards in their original order.
+        excludeFromContext: m.excludeFromContext,
+        summaryText: m.summaryText,
+        summaryRange: m.summaryRange,
+        summaryInputTokens: m.summaryInputTokens,
+        summaryOutputTokens: m.summaryOutputTokens,
+        summaryModel: m.summaryModel,
+        summaryCreatedAt: m.summaryCreatedAt,
+        summaryExpanded: m.summaryExpanded,
+        // Phase UX-3: a snapshot of the messages this card replaced
+        // — round-trips through chats.json so a reload preserves the
+        // ability to "развернуть" the original text. The full chat
+        // card is reconstructed (role + raw + html + kind), enough
+        // for the restoreSummary() handler to splice them back into
+        // `messages[]` exactly where the summary sits.
+        foldedMessages: m.foldedMessages,
       }));
       const summary = await saveChat(chatId, null, slim);
       chatId = summary.id;
@@ -356,7 +394,7 @@
     setTimeout(() => inputEl?.focus(), 50);
   }
   let mediaSearch = '';
-  let messages: Array<{ id: number; role: string; html: string; raw?: string; streaming?: boolean; thinking?: string; thinkingOpen?: boolean; kind?: 'text' | 'image' | 'image_loading' | 'tool_use' | 'tool_result' | 'subagents' | 'web_search' | 'plan' | 'file_edit' | 'file_read' | 'video_frame' | 'ask_user'; imageDataUrl?: string; imagePrompt?: string; imageAspect?: ImageAspect; toolName?: string; toolArgs?: string; toolArgsOpen?: boolean; toolError?: string; toolStatus?: 'pending' | 'ok' | 'error'; subagents?: Array<{ id: number; title: string; status: 'pending' | 'ok' | 'error'; result?: { title: string; snippet: string; url: string; source: string }[]; dataUrl?: string; aspect?: string }>; subKind?: 'research' | 'images'; webQuery?: string; webResults?: Array<{ title: string; url: string; snippet: string; host: string }>; webExpanded?: boolean; planTitle?: string; planSteps?: Array<{ id: string; title: string; status: 'pending' | 'in_progress' | 'done' | 'error'; note?: string }>; typedText?: string; pendingText?: string; toolCount?: number; modelTag?: string; createdAt?: number; filePath?: string; fileDiff?: string; fileEditId?: string; fileEditState?: 'pending' | 'accepted' | 'rejected' | 'expired'; fileReadBytes?: number; fileReadLines?: number; fileReadContent?: string; fileReadOpen?: boolean; videoFrameUrl?: string; videoFrameKind?: 'observe_now' | 'latest_frame'; videoFrameMeta?: { monitor_id: number; width: number; height: number; bytes: number; seq: number; t_ms: number }; askQuestion?: string; askOptions?: string[]; askCallId?: string; askAnswer?: string }> = [];
+  let messages: Array<{ id: number; role: string; html: string; raw?: string; streaming?: boolean; thinking?: string; thinkingOpen?: boolean; kind?: 'text' | 'image' | 'image_loading' | 'tool_use' | 'tool_result' | 'subagents' | 'web_search' | 'plan' | 'file_edit' | 'file_read' | 'video_frame' | 'ask_user' | 'summary'; imageDataUrl?: string; imagePrompt?: string; imageAspect?: ImageAspect; toolName?: string; toolArgs?: string; toolArgsOpen?: boolean; toolError?: string; toolStatus?: 'pending' | 'ok' | 'error'; subagents?: Array<{ id: number; title: string; status: 'pending' | 'ok' | 'error'; result?: { title: string; snippet: string; url: string; source: string }[]; dataUrl?: string; aspect?: string }>; subKind?: 'research' | 'images'; webQuery?: string; webResults?: Array<{ title: string; url: string; snippet: string; host: string }>; webExpanded?: boolean; planTitle?: string; planSteps?: Array<{ id: string; title: string; status: 'pending' | 'in_progress' | 'done' | 'error'; note?: string }>; typedText?: string; pendingText?: string; toolCount?: number; modelTag?: string; createdAt?: number; filePath?: string; fileDiff?: string; fileEditId?: string; fileEditState?: 'pending' | 'accepted' | 'rejected' | 'expired'; fileReadBytes?: number; fileReadLines?: number; fileReadContent?: string; fileReadOpen?: boolean; videoFrameUrl?: string; videoFrameKind?: 'observe_now' | 'latest_frame'; videoFrameMeta?: { monitor_id: number; width: number; height: number; bytes: number; seq: number; t_ms: number }; askQuestion?: string; askOptions?: string[]; askCallId?: string; askAnswer?: string; excludeFromContext?: boolean; summaryText?: string; summaryRange?: { fromId: number; toId: number; count: number }; summaryInputTokens?: number; summaryOutputTokens?: number; summaryModel?: string; summaryCreatedAt?: number; summaryExpanded?: boolean; foldedMessages?: Array<{ id: number; role: string; raw?: string; html?: string; kind?: string; createdAt?: number }> }> = [];
   let inputText = '';
   // Exposed via bind:busy so the parent (App.svelte) can pass it to
   // the PlansSidebar and disable the Run button while we stream.
@@ -482,6 +520,249 @@
   let installingId: string | null = null;
   let downloadProgress = '';
   let downloadPct: number | null = null;
+
+  // ---- voice output (TTS) ----
+  // Real-time TTS for assistant messages. While `ttsEnabled` is on,
+  // every streaming assistant message is split on sentence boundaries
+  // and each sentence is sent through daimonionSynthesize, then played
+  // back via an <audio> element. Persisted in localStorage so the
+  // preference survives restarts.
+  const TTS_STORAGE_KEY = 'luna.chat.ttsEnabled';
+  const TTS_VOICE_STORAGE_KEY = 'luna.chat.ttsVoiceId';
+  let ttsEnabled = false;
+  let ttsActive = false; // true while audio is playing
+  let ttsQueue: string[] = []; // pending sentence chunks
+  let ttsBuffer = ''; // current sentence being accumulated
+  let ttsCurrentAudio: HTMLAudioElement | null = null;
+  let ttsCurrentMsgId: number | null = null;
+  let ttsVoiceId = 'male-qn-jingying';
+  let ttsBusy = false; // true while a daimonionSynthesize call is in flight
+  let ttsSpeakingMsgId: number | null = null; // the message id currently being spoken
+  // Per-message-id map of generated audio for replay button.
+  const ttsAudioCache = new Map<number, string>(); // msgId -> data:audio/... uri
+  // Max characters per TTS chunk. Caps cost/latency on long messages.
+  const TTS_MAX_CHARS = 240;
+  // Min chars before allowing sentence-break flush. Avoids speaking
+  // tiny fragments like "OK" or "Yes" out of context.
+  const TTS_MIN_CHARS = 18;
+
+  function loadTtsPrefs() {
+    try {
+      const v = localStorage.getItem(TTS_STORAGE_KEY);
+      ttsEnabled = v === '1' || v === 'true';
+      const voice = localStorage.getItem(TTS_VOICE_STORAGE_KEY);
+      if (voice) ttsVoiceId = voice;
+    } catch { /* ignore */ }
+  }
+  function saveTtsPrefs() {
+    try {
+      localStorage.setItem(TTS_STORAGE_KEY, ttsEnabled ? '1' : '0');
+      localStorage.setItem(TTS_VOICE_STORAGE_KEY, ttsVoiceId);
+    } catch { /* ignore */ }
+  }
+
+  /** Strip markdown / code fences / tool markup from text so the
+   *  TTS engine reads something that sounds natural. Code blocks
+   *  become "code block" so the user still hears a cue. Inline
+   *  formatting (bold, italic, code) is dropped. */
+  function stripMarkdownForTts(s: string): string {
+    if (!s) return '';
+    let out = s;
+    // Drop fenced code blocks entirely (replaced with a spoken marker).
+    out = out.replace(/```[\s\S]*?```/g, ' code block. ');
+    // Inline code: keep content but drop backticks.
+    out = out.replace(/`([^`]+)`/g, '$1');
+    // Bold / italic markers.
+    out = out.replace(/\*\*([^*]+)\*\*/g, '$1');
+    out = out.replace(/\*([^*]+)\*/g, '$1');
+    out = out.replace(/__([^_]+)__/g, '$1');
+    out = out.replace(/_([^_]+)_/g, '$1');
+    // Markdown headings at line start.
+    out = out.replace(/^\s{0,3}#{1,6}\s+/gm, '');
+    // List bullets at line start.
+    out = out.replace(/^\s{0,3}[-*+]\s+/gm, '');
+    // Numbered list prefix.
+    out = out.replace(/^\s{0,3}\d+\.\s+/gm, '');
+    // Links: keep label, drop URL.
+    out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1');
+    // Blockquote markers.
+    out = out.replace(/^\s{0,3}>\s?/gm, '');
+    // Collapse whitespace.
+    out = out.replace(/\s+/g, ' ').trim();
+    return out;
+  }
+
+  function stopTts() {
+    ttsQueue = [];
+    ttsBuffer = '';
+    if (ttsCurrentAudio) {
+      try { ttsCurrentAudio.pause(); } catch { /* noop */ }
+      ttsCurrentAudio = null;
+    }
+    ttsActive = false;
+    ttsBusy = false;
+    ttsCurrentMsgId = null;
+    ttsSpeakingMsgId = null;
+  }
+
+  async function speakText(text: string): Promise<void> {
+    const cleaned = stripMarkdownForTts(text);
+    if (!cleaned) return;
+    ttsBusy = true;
+    try {
+      const resp: TtsResponse = await daimonionSynthesize({
+        text: cleaned,
+        voice_id: ttsVoiceId,
+        format: 'mp3',
+      });
+      const uri = audioDataUri(resp);
+      ttsCurrentAudio = new Audio(uri);
+      ttsActive = true;
+      ttsCurrentAudio.onended = () => {
+        // Drain the next chunk in the queue.
+        ttsCurrentAudio = null;
+        ttsActive = ttsQueue.length > 0;
+        if (ttsQueue.length > 0) {
+          const next = ttsQueue.shift()!;
+          speakText(next);
+        } else {
+          ttsSpeakingMsgId = null;
+        }
+      };
+      ttsCurrentAudio.onerror = () => {
+        ttsCurrentAudio = null;
+        ttsActive = false;
+        ttsBusy = false;
+        ttsSpeakingMsgId = null;
+      };
+      await ttsCurrentAudio.play();
+    } catch (e) {
+      console.warn('[tts] speakText failed:', e);
+      ttsBusy = false;
+      ttsActive = false;
+      // Continue draining queue so we don't get stuck.
+      if (ttsQueue.length > 0) {
+        const next = ttsQueue.shift()!;
+        speakText(next);
+      } else {
+        ttsSpeakingMsgId = null;
+      }
+    }
+  }
+
+  /** Process a streaming delta. Buffers until we hit a sentence
+   *  boundary or the buffer grows past TTS_MAX_CHARS, then enqueues
+   *  a TTS job. */
+  function processTtsDelta(delta: string) {
+    if (!ttsEnabled || !delta) return;
+    ttsBuffer += delta;
+    // Look for sentence boundaries. Pick the LAST one in the buffer
+    // so we send as much text as possible per TTS call.
+    const lastBoundary = findLastSentenceBoundary(ttsBuffer);
+    if (lastBoundary >= TTS_MIN_CHARS) {
+      const chunk = ttsBuffer.slice(0, lastBoundary).trim();
+      ttsBuffer = ttsBuffer.slice(lastBoundary);
+      if (chunk) {
+        ttsQueue.push(chunk);
+        if (!ttsBusy && !ttsActive) {
+          const next = ttsQueue.shift()!;
+          speakText(next);
+        }
+      }
+    } else if (ttsBuffer.length >= TTS_MAX_CHARS) {
+      // Force a flush on long unpunctuated runs (e.g. one big sentence).
+      const chunk = ttsBuffer.trim();
+      ttsBuffer = '';
+      if (chunk) {
+        ttsQueue.push(chunk);
+        if (!ttsBusy && !ttsActive) {
+          const next = ttsQueue.shift()!;
+          speakText(next);
+        }
+      }
+    }
+  }
+
+  function findLastSentenceBoundary(s: string): number {
+    // Find the index right after the last sentence-ending punctuation
+    // followed by whitespace. We accept . ! ? including Cyrillic equivalents
+    // (Russian full stop is U+002E same as ASCII, so plain . works).
+    let last = -1;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      // Skip "..." ellipsis-style runs: only count if the next char is
+      // not another dot, and either end-of-string or whitespace follows.
+      if ((c === '.' || c === '!' || c === '?') && (i === s.length - 1 || /\s/.test(s[i + 1]))) {
+        // Avoid the "." after a number like "0.5" or "192.168" — heuristic:
+        // previous char is digit AND next non-space char is also digit.
+        if (c === '.') {
+          const prev = i > 0 ? s[i - 1] : '';
+          const nextNonSpace = s.slice(i + 1).match(/\S/)?.[0] ?? '';
+          if (/\d/.test(prev) && /\d/.test(nextNonSpace)) continue;
+        }
+        // Skip a trailing "." inside a markdown link target we missed
+        // (defensive — stripMarkdownForTts handles most cases).
+        if (c === '.' && s.slice(Math.max(0, i - 10), i).includes('](')) continue;
+        last = i + 1;
+      }
+    }
+    return last;
+  }
+
+  function flushTts() {
+    if (!ttsEnabled) return;
+    const tail = ttsBuffer.trim();
+    ttsBuffer = '';
+    if (!tail) return;
+    ttsQueue.push(tail);
+    if (!ttsBusy && !ttsActive) {
+      const next = ttsQueue.shift()!;
+      speakText(next);
+    }
+  }
+
+  function toggleTts() {
+    ttsEnabled = !ttsEnabled;
+    saveTtsPrefs();
+    if (!ttsEnabled) stopTts();
+  }
+
+  /** Replay an already-finished message. Lazily synthesises audio
+   *  if not cached. */
+  async function replayMessage(msgId: number) {
+    const m = messages.find((mm) => mm.id === msgId);
+    if (!m) return;
+    const text = m.raw ?? m.html?.replace(/<[^>]+>/g, '') ?? '';
+    if (!text) return;
+    stopTts();
+    ttsSpeakingMsgId = msgId;
+    let uri = ttsAudioCache.get(msgId);
+    if (!uri) {
+      try {
+        const resp = await daimonionSynthesize({ text, voice_id: ttsVoiceId, format: 'mp3' });
+        uri = audioDataUri(resp);
+        ttsAudioCache.set(msgId, uri);
+      } catch (e) {
+        console.warn('[tts] replay failed:', e);
+        ttsSpeakingMsgId = null;
+        return;
+      }
+    }
+    ttsCurrentAudio = new Audio(uri);
+    ttsActive = true;
+    ttsCurrentAudio.onended = () => {
+      ttsCurrentAudio = null;
+      ttsActive = false;
+      ttsSpeakingMsgId = null;
+    };
+    ttsCurrentAudio.onerror = () => {
+      ttsCurrentAudio = null;
+      ttsActive = false;
+      ttsSpeakingMsgId = null;
+    };
+    try { await ttsCurrentAudio.play(); } catch { /* noop */ }
+  }
+
   async function toggleVoice() {
     voiceError = '';
     try {
@@ -662,7 +943,7 @@
   //   - `role`   — raw API role
   //   - `content`— full reconstructed text (not a preview)
   //   - `tokens` / `chars` — usage estimate
-  type RealContextKind = 'system' | 'user' | 'assistant' | 'thinking' | 'tool' | 'image' | 'plan' | 'web' | 'subagent' | 'file';
+  type RealContextKind = 'system' | 'user' | 'assistant' | 'thinking' | 'tool' | 'image' | 'plan' | 'web' | 'subagent' | 'file' | 'summary';
   type RealContextItem = {
     id: string;
     msgId: number;
@@ -692,6 +973,13 @@
     //    streaming message too, so the gauge moves as Luna types.
     for (const m of messages) {
       if (m.role === 'system') continue; // already represented by stub
+      // Phase UX-3: messages the user has explicitly excluded from
+      // the context window (e.g. a file they temporarily removed to
+      // free up tokens) are skipped here so the gauge reflects the
+      // effective token cost. The message still renders in the chat
+      // — this is not a deletion, just a context-window bookkeeping
+      // toggle. See the "📎 Файлы в контексте" section in the popover.
+      if (m.excludeFromContext) continue;
       let text = '';
       let kind: RealContextKind = 'user';
       let label = m.role;
@@ -734,6 +1022,15 @@
           text = (m.filePath || '') + ' ' + (m.fileDiff || m.fileReadContent || '');
           kind = 'file';
           label = '📄 ' + (m.kind === 'file_edit' ? 'Правка' : 'Чтение');
+        } else if (m.kind === 'summary') {
+          // Phase UX-3: a server-side `summarise_chat` collapsed
+          // some older messages into this single card. The card
+          // counts as one chunk in the gauge, with text equal to
+          // the summary body (which is what the model will see).
+          text = m.summaryText || m.raw || m.html || '';
+          kind = 'summary';
+          const n = m.summaryRange?.count ?? 0;
+          label = '📜 Сводка' + (n > 0 ? ` (${n} сообщ.)` : '');
         } else if (m.kind === 'image') {
           // Images are converted to a flat ~800-token cost on the API side.
           kind = 'image';
@@ -775,6 +1072,7 @@
       plan:      { count: 0, tokens: 0, label: 'Планы',          color: 'var(--code-cta)' },
       subagent:  { count: 0, tokens: 0, label: 'Sub-агенты',     color: '#a8c97a' },
       file:      { count: 0, tokens: 0, label: 'Файлы',         color: '#cfb37a' },
+      summary:   { count: 0, tokens: 0, label: 'Сводки',        color: '#7a9ecf' },
     };
     for (const it of realContext) {
       groups[it.kind].count += 1;
@@ -786,6 +1084,256 @@
       .map(([k, v]) => ({ kind: k as RealContextKind, ...v, pct: Math.round((v.tokens / total) * 100) }))
       .sort((a, b) => b.tokens - a.tokens);
   })();
+
+  // ---- Phase UX-3: context-window bookkeeping ----
+  // The user can temporarily remove files from the gauge without
+  // deleting them from the chat (toggle × in the popover). We
+  // surface every `file_read` and `file_edit` message that still
+  // exists, regardless of its current exclusion state, so the user
+  // can both remove and restore entries.
+  $: filesInContext = (() => {
+    const out: Array<{
+      msgId: number;
+      path: string;
+      bytes: number;
+      lines: number;
+      kind: 'file_read' | 'file_edit';
+      excludeFromContext: boolean;
+    }> = [];
+    for (const m of messages) {
+      if (m.kind !== 'file_read' && m.kind !== 'file_edit') continue;
+      if (!m.filePath) continue;
+      out.push({
+        msgId: m.id,
+        path: m.filePath,
+        bytes: m.fileReadBytes ?? 0,
+        lines: m.fileReadLines ?? 0,
+        kind: m.kind,
+        excludeFromContext: !!m.excludeFromContext,
+      });
+    }
+    // Most recent first — newer reads are usually what the user is
+    // currently thinking about.
+    return out.reverse();
+  })();
+
+  function toggleExcludeFromContext(msgId: number) {
+    const m = messages.find((mm) => mm.id === msgId);
+    if (!m) return;
+    const next = !m.excludeFromContext;
+    // Toggle the UI flag first so the gauge updates without waiting
+    // for the IPC round-trip — Rust's behaviour is gated on its own
+    // set, but the chat is gated on the message flag, so they can
+    // briefly disagree. The `setFileExcluded` call below catches up
+    // before the next user message goes out.
+    messages = messages.map((mm) =>
+      mm.id === msgId ? { ...mm, excludeFromContext: next } : mm,
+    );
+    if (m.filePath) {
+      // Tell Rust so the next read_file call from the agent short-
+      // circuits and so the model never sees the content through
+      // either the user-message path or the tool_result path.
+      setFileExcluded(m.filePath, next).catch((e) => {
+        console.warn('[Chat] setFileExcluded failed:', e);
+      });
+    }
+  }
+
+  function formatBytes(n: number): string {
+    if (!n) return '0 B';
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  // ---- Phase UX-3: attach file from workspace ----
+  // The user can pin a file by hand from the same popover where they
+  // manage exclusions. We list the workspace root via `listDir` and,
+  // on click, run `readFile` ourselves and append a `file_read`
+  // message — the same shape the Rust side emits when the agent
+  // reads a file on its own. The model doesn't see "this came from
+  // the user"; it just sees a file_read card in history.
+  let attachPickerOpen = false;
+  let attachPickerFiles: Array<{ path: string; isDir: boolean; size?: number }> = [];
+  let attachPickerError = '';
+  let attachPickerLoading = false;
+  let attachPickerDir = '';
+
+  async function openAttachPicker() {
+    if (!currentWorkspace) {
+      showError('Откройте workspace в code-mode, чтобы прикреплять файлы');
+      return;
+    }
+    attachPickerDir = currentWorkspace.path;
+    attachPickerOpen = true;
+    attachPickerError = '';
+    attachPickerLoading = true;
+    try {
+      const entries = await listDir(currentWorkspace.path, '');
+      attachPickerFiles = (entries || []).map((e) => ({
+        path: e.path,
+        isDir: e.is_dir,
+        size: e.size,
+      }));
+    } catch (e) {
+      attachPickerError = String((e as Error)?.message ?? e);
+    } finally {
+      attachPickerLoading = false;
+    }
+  }
+
+  function closeAttachPicker() {
+    attachPickerOpen = false;
+  }
+
+  async function attachFile(path: string) {
+    try {
+      const res = await readFile(path);
+      const msgId = nextId++;
+      messages = [
+        ...messages,
+        {
+          id: msgId,
+          role: 'assistant',
+          html: '',
+          kind: 'file_read',
+          filePath: res.path,
+          fileReadBytes: res.bytes,
+          fileReadLines: res.lines,
+          fileReadContent: res.content,
+          fileReadOpen: false,
+          createdAt: Date.now(),
+        } as typeof messages[number],
+      ];
+      attachPickerOpen = false;
+      tick().then(() => scrollToBottom());
+    } catch (e) {
+      attachPickerError = 'read_file: ' + String((e as Error)?.message ?? e);
+    }
+  }
+
+  // ---- Phase UX-3: chat summarisation ----
+  // The "📜 Сжать чат" action takes a slice of the current
+  // messages[] (everything except the last KEEP_LAST), runs it
+  // through the server-side `summarise_chat` Tauri command, and
+  // replaces the slice with a single `kind='summary'` message.
+  // Cheap (M2.7-highspeed, max 800 output tokens), preserves
+  // every concrete fact, and gives the user a big gauge drop.
+  let summariseBusy = false;
+  const KEEP_LAST = 6; // ≈ 3 user/assistant turns; never compress the in-flight tail
+
+  async function summariseOlder() {
+    if (busy || summariseBusy) return;
+    if (messages.length < 8) return;
+    const target = messages.slice(0, messages.length - KEEP_LAST);
+    if (target.length < 2) {
+      showError('Недостаточно сообщений для сжатия');
+      return;
+    }
+    summariseBusy = true;
+    try {
+      // Hard cap each message at 4 KB. Code dumps and large file
+      // contents are already excluded via `excludeFromContext` (or
+      // wouldn't have been summarised anyway), so this only matters
+      // for very long assistant replies.
+      const api = target
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .filter((m) => (m.raw || m.html || '').trim().length > 0)
+        .map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: (m.raw || m.html || '').slice(0, 4000),
+        }));
+
+      const res = await summariseChat({ messages: api });
+      if (!res.summary || !res.summary.trim()) {
+        throw new Error('Сводка пустая');
+      }
+
+      const summaryMsg = {
+        id: nextId++,
+        role: 'system',
+        html: renderMarkdown(res.summary),
+        raw: res.summary,
+        kind: 'summary',
+        summaryText: res.summary,
+        summaryRange: {
+          fromId: target[0].id,
+          toId: target[target.length - 1].id,
+          count: target.length,
+        },
+        summaryInputTokens: res.input_tokens,
+        summaryOutputTokens: res.output_tokens,
+        summaryModel: 'MiniMax-M2.7-highspeed',
+        summaryCreatedAt: Date.now(),
+        summaryExpanded: false,
+        // Snapshot the messages we just folded so the user can
+        // "развернуть" the summary back to the original text inside
+        // the chat. We only carry the parts the renderer needs
+        // (role + raw + html + kind) to keep the snapshot small;
+        // nested tool state (file_read content, plan steps, etc.)
+        // is referenced by id from the original card.
+        foldedMessages: target.map((m) => ({
+          id: m.id,
+          role: m.role,
+          raw: m.raw,
+          html: m.html,
+          kind: m.kind,
+          createdAt: m.createdAt,
+        })),
+        createdAt: Date.now(),
+      } as typeof messages[number];
+
+      messages = [summaryMsg, ...messages.slice(target.length)];
+      // scheduleChatSave is reactive on `messages`, so the change
+      // will be persisted via the existing 600 ms debounce.
+      const saved = (res.input_tokens || 0) + (res.output_tokens || 0);
+      showError(`Сжато ${target.length} сообщений → ${formatTokens(saved)} токенов на сводку`);
+    } catch (e) {
+      showError('Сжатие не удалось: ' + ((e as Error)?.message ?? e));
+    } finally {
+      summariseBusy = false;
+    }
+  }
+
+  function toggleSummaryExpanded(msgId: number) {
+    messages = messages.map((m) =>
+      m.id === msgId ? { ...m, summaryExpanded: !m.summaryExpanded } : m,
+    );
+  }
+
+  /** Replace a `kind='summary'` card with the messages it folded.
+   *  Round-trips through the same id so any scroll/jump helpers that
+   *  reference the snapshot ids keep working. The replacement is
+   *  in-place: the summary card disappears and the original
+   *  messages take its position in `messages[]`. */
+  function restoreSummary(msgId: number) {
+    const idx = messages.findIndex((m) => m.id === msgId);
+    if (idx < 0) return;
+    const sum = messages[idx];
+    if (sum.kind !== 'summary') return;
+    if (!sum.foldedMessages || sum.foldedMessages.length === 0) {
+      showError('Сводка без сохранённого оригинала — нечего разворачивать');
+      return;
+    }
+    // Re-hydrate the snapshot. We keep only the fields the chat
+    // card template needs; anything that needs re-fetching (e.g. a
+    // file_read content) will need to be re-loaded by the agent on
+    // demand. For most user / assistant turns the inline `raw` /
+    // `html` is sufficient to render the bubble.
+    const restored = sum.foldedMessages.map((f) => {
+      const base: typeof messages[number] = {
+        id: f.id,
+        role: f.role,
+        html: f.html || '',
+        raw: f.raw || '',
+        createdAt: f.createdAt,
+      } as typeof messages[number];
+      if (f.kind) (base as any).kind = f.kind;
+      return base;
+    });
+    messages = [...messages.slice(0, idx), ...restored, ...messages.slice(idx + 1)];
+    tick().then(() => scrollToBottom());
+  }
 
   // Estimate $ cost using rough published per-1M-token rates. We only
   // need an order of magnitude; the numbers come from MiniMax's own
@@ -2177,6 +2725,51 @@
     }
   }
 
+  /** Called by App.svelte (forwarded from ChatHistoryList) when the
+   *  user picks a chat from the sidebar. We load the full chat
+   *  from disk, swap `messages` in, mark `loadedFromDisk` so the
+   *  auto-intro doesn't overwrite history, and reset the stream
+   *  token so any in-flight stream is dropped. */
+  export async function loadChatById(id: string): Promise<void> {
+    try {
+      const full = await loadChat(id);
+      if (!full || !Array.isArray(full.messages)) return;
+      // Drop any in-flight stream — the user is jumping to a
+      // different conversation, so old tokens are now noise.
+      const oldChatId = chatId;
+      streamToken++;
+      streamingId = null;
+      clearStreaming(oldChatId);
+      busy = false;
+      chatId = full.id;
+      messages = full.messages as typeof messages;
+      loadedFromDisk = true;
+      history = [];
+      // Drop any plan links to the previous chat — those were
+      // attached to a different message stream. New ai_plan_created
+      // events from the freshly loaded chat will re-link via
+      // recordAgentPlan when they fire.
+      toolCallToPlan.set({});
+      planMessageMap.set({});
+      // Re-render the message list from the top.
+      tick().then(() => scrollToBottom());
+    } catch (e) {
+      console.warn('[Chat] loadChatById failed:', e);
+      showError(`Не удалось загрузить чат: ${(e as Error)?.message ?? e}`);
+    }
+  }
+
+  /** Called by App.svelte when the user clicks the "+" new-chat
+   *  button in the sidebar. Flushes any pending save, then starts
+   *  a fresh conversation — same path as the in-composer "Новый
+   *  чат" button, just callable from outside. */
+  export async function startNewChatFromSidebar(): Promise<void> {
+    // Reuse the existing startNewChat() which handles the
+    // flush-and-clear dance. We just need to clear the highlight
+    // on the App side; that's done by the caller.
+    await startNewChat();
+  }
+
   // The intro line is the only "system" message that should follow the
   // current mode. Drop it (if present) and append a fresh one. Called on
   // mount, on `setMode`, and on key status change.
@@ -2233,12 +2826,42 @@
       return;
     }
 
-    // 3) Open a link via the Tauri shell (was the only handler before).
+    // 3) Open a link. Default: dispatch `luna:open-link` so App.svelte
+    //    can route it to the right sidebar's Web pane. Escape hatches:
+    //    Cmd/Ctrl-click or middle-click → open in the OS browser via
+    //    the existing Tauri `open_url` command. We also let plain
+    //    `target="_blank"` (web search results) fall through when
+    //    those modifiers are held, matching browser conventions.
     const a = t.closest('a[data-url]') as HTMLAnchorElement | null;
-    if (!a) return;
-    e.preventDefault();
+    if (!a) {
+      // 3a) Web-search results / sub-agent result lists use bare
+      // <a href> (no `data-url`). Treat them the same as a regular
+      // link click — dispatch to the sidebar.
+      const bareA = t.closest('a[href]') as HTMLAnchorElement | null;
+      if (!bareA) return;
+      const href = bareA.getAttribute('href');
+      if (!href || !/^https?:\/\//i.test(href)) return;
+      if (e.metaKey || e.ctrlKey || e.button === 1) {
+        openUrl(href).catch((err) => showError('open_url: ' + err));
+        return;
+      }
+      e.preventDefault();
+      window.dispatchEvent(
+        new CustomEvent('luna:open-link', { detail: { url: href } }),
+      );
+      return;
+    }
     const url = a.getAttribute('data-url');
-    if (url) openUrl(url).catch((err) => showError('open_url: ' + err));
+    if (!url) return;
+    if (e.metaKey || e.ctrlKey || e.button === 1) {
+      e.preventDefault();
+      openUrl(url).catch((err) => showError('open_url: ' + err));
+      return;
+    }
+    e.preventDefault();
+    window.dispatchEvent(
+      new CustomEvent('luna:open-link', { detail: { url } }),
+    );
   }
 
   // Tiny clipboard helper that flashes the button label for 1.5s.
@@ -2267,6 +2890,9 @@
     }
     const text = inputText.trim();
     if (!text || !hasMinimax) return;
+    // New user message — stop any in-flight TTS so the new reply
+    // gets a clean audio start.
+    stopTts();
     inputText = '';
     if (inputEl) inputEl.style.height = 'auto';
     errorBanner = '';
@@ -2393,6 +3019,7 @@
         }
       }
     }
+    setStreaming(chatId);
     busy = true;
     try {
       await doChat(text);
@@ -2402,6 +3029,7 @@
       if (mode === 'chat') history.pop();
     } finally {
       busy = false;
+      clearStreaming(chatId);
       inputEl?.focus();
     }
   }
@@ -2422,6 +3050,7 @@
         );
       }
     }
+    clearStreaming(chatId);
     busy = false;
   }
 
@@ -2529,6 +3158,13 @@
             ? { ...m, pendingText: (m.pendingText ?? '') + text }
             : m
         );
+        // TTS: stream the same cleaned delta through the sentence
+        // buffer. Toggled on/off via ttsEnabled (Settings → Voice).
+        if (ttsCurrentMsgId !== currentTextId) {
+          // First chunk for this message — track it for replay.
+          ttsCurrentMsgId = currentTextId;
+        }
+        processTtsDelta(text);
       }
       if (fromTags) {
         think += (think ? '\n\n' : '') + fromTags;
@@ -2586,6 +3222,9 @@
         patchMessage(id, { html: renderMarkdown('_(пустой ответ)_'), raw: '(пустой ответ)' });
       }
       if (streamingId === id || streamingId === currentTextId) streamingId = null;
+      // TTS: flush whatever's left in the sentence buffer.
+      flushTts();
+      ttsCurrentMsgId = null;
     });
   // Build a placeholder message for a tool_use event so the UI can show
   // something the moment the model invokes a tool. Returned messages use
@@ -2969,6 +3608,9 @@
     // Idempotent — HMR can re-run onMount; the bootstrap guards itself.
     bootstrapAugmentations();
 
+    // Restore TTS preference (toggle + voice id) from localStorage.
+    loadTtsPrefs();
+
     // Phase UX-1: forward backend `persona:slash-fired` events into the
     // local aug system so a backend-driven slash (e.g. from the TG bot
     // or a sub-agent) lights up the corresponding card.
@@ -3149,6 +3791,8 @@
   });
 
   onDestroy(() => {
+    // TTS cleanup: stop any in-flight audio + clear state.
+    stopTts();
     for (const u of voiceUnlistens) try { u(); } catch { /* ignore */ }
     for (const u of streamUnlisten) try { u(); } catch { /* ignore */ }
     for (const u of workspaceUnlisten) try { u(); } catch { /* ignore */ }
@@ -3167,17 +3811,44 @@
       </span>
     </div>
     <div class="middle">
-      <button class="seg" class:on={mode === 'chat'} on:click={() => setMode('chat')}>💬 Chat</button>
-      <button class="seg" class:on={mode === 'code'} on:click={() => setMode('code')}>
-        💻 Code{currentWorkspace ? '' : ' · no ws'}
+      <button
+        class="seg seg-icon"
+        class:on={mode === 'chat'}
+        on:click={() => setMode('chat')}
+        title="Chat · обычный диалог (Ctrl+1)"
+        aria-label="Chat"
+      >{@html IconChat()}</button>
+      <button
+        class="seg seg-icon"
+        class:on={mode === 'code'}
+        on:click={() => setMode('code')}
+        title={`Code · работа с файлами воркспейса${currentWorkspace ? '' : ' (no workspace)'}`}
+        aria-label="Code"
+      >{@html IconCode()}</button>
+      <button
+        class="seg seg-icon"
+        class:on={mode === 'research'}
+        on:click={() => setMode('research')}
+        title="Fusion Research · лента по интересам"
+        aria-label="Research"
+      >{@html IconResearch()}</button>
+      <button
+        class="seg seg-icon"
+        class:on={mode === 'media'}
+        on:click={() => setMode('media')}
+        title="Media · картинки от агента"
+        aria-label="Media"
+      >
+        {@html IconMedia()}
+        {#if imageResults.length > 0}<span class="seg-badge">{imageResults.length}</span>{/if}
       </button>
-      <button class="seg" class:on={mode === 'research'} on:click={() => setMode('research')}>🔬 Fusion Research</button>
-      <button class="seg" class:on={mode === 'media'} on:click={() => setMode('media')}>
-        🖼 Media{#if imageResults.length > 0}<span class="seg-badge">{imageResults.length}</span>{/if}
-      </button>
-      <button class="seg" class:on={mode === 'plan'} on:click={() => setMode('plan')}>
-        📋 План
-      </button>
+      <button
+        class="seg seg-icon"
+        class:on={mode === 'plan'}
+        on:click={() => setMode('plan')}
+        title="Plan · создать план и запустить"
+        aria-label="Plan"
+      >{@html IconPlan()}</button>
     </div>
     <div class="right">
       <label class="model-pick" title="Выбор модели MiniMax">
@@ -3188,7 +3859,27 @@
           {/each}
         </select>
       </label>
-      <button class="ico danger" on:click={clearChat} title="Очистить чат" aria-label="Clear">🗑</button>
+      <!-- TTS toggle: when on, assistant messages are spoken in
+           real-time via MiniMax T2A. Streaming chunking splits on
+           sentence boundaries so playback starts before the message
+           finishes. -->
+      <button
+        class="ico icon-btn tts-btn"
+        class:on={ttsEnabled}
+        class:speaking={ttsActive}
+        on:click={toggleTts}
+        title={ttsEnabled
+          ? (ttsActive ? 'Озвучивание: ВКЛ (играет…) · клик чтобы выкл' : 'Озвучивание: ВКЛ · клик чтобы выкл')
+          : 'Озвучивание выкл · клик чтобы вкл'}
+        aria-label="Toggle TTS"
+        aria-pressed={ttsEnabled}
+      >{ttsActive ? '🔊' : ttsEnabled ? '🔉' : '🔈'}</button>
+      <button
+        class="ico icon-btn"
+        on:click={clearChat}
+        title="Очистить чат"
+        aria-label="Очистить чат"
+      >{@html IconTrash()}</button>
     </div>
   </header>
 
@@ -3678,7 +4369,7 @@
                       </span>
                       <span class="think-chevron">{thinkingOpen ? '▾' : '▸'}</span>
                     </button>
-                    {#if thinkingOpen}<div class="think-body">{m.thinking}</div>{/if}
+                    {#if thinkingOpen}<div class="think-body">{@html renderMarkdown(m.thinking || '')}</div>{/if}
                   </div>
                 {/if}
                 <div class="msg-bubble" class:streaming={m.streaming && m.kind !== 'image' && m.kind !== 'tool_use'}>
@@ -3764,6 +4455,73 @@
                         </li>
                       {/each}
                     </ol>
+                  </div>
+                {:else if m.kind === 'summary'}
+                  <!-- Phase UX-3: server-side summarisation card.
+                       Replaces a slice of older messages with a
+                       single tight recap. Counts as one chunk in
+                       the gauge. Expand to read the full body and
+                       the inline preview of the folded messages;
+                       "↩ Развернуть" splices the originals back in
+                       place. -->
+                  <div class="summary-card" class:summary-card-open={m.summaryExpanded}>
+                    <button
+                      class="summary-card-head"
+                      type="button"
+                      on:click={() => toggleSummaryExpanded(m.id)}
+                      aria-expanded={!!m.summaryExpanded}
+                    >
+                      <span class="summary-card-icon">📜</span>
+                      <span class="summary-card-title">
+                        Сводка {m.summaryRange?.count ?? 0} сообщений
+                      </span>
+                      <span class="summary-card-meta">
+                        {#if m.summaryInputTokens != null && m.summaryOutputTokens != null}
+                          ≈{formatTokens((m.summaryInputTokens || 0) + (m.summaryOutputTokens || 0))} tok
+                          ·
+                        {/if}
+                        <time>{formatTime(m.summaryCreatedAt)}</time>
+                        {#if m.summaryModel}<span class="summary-card-model">{m.summaryModel}</span>{/if}
+                      </span>
+                      <span class="summary-card-chevron">{m.summaryExpanded ? '▾' : '▸'}</span>
+                    </button>
+                    {#if m.summaryExpanded}
+                      <div class="summary-card-body">{@html m.html}</div>
+                      {#if m.foldedMessages && m.foldedMessages.length > 0}
+                        <div class="summary-card-folded">
+                          <div class="summary-card-folded-head">
+                            Свернуто {m.foldedMessages.length} сообщ.:
+                          </div>
+                          <ol class="summary-card-folded-list">
+                            {#each m.foldedMessages as f, i (f.id)}
+                              {@const preview = (f.raw || f.html || '').replace(/\s+/g, ' ').trim().slice(0, 120)}
+                              {@const isUser = f.role === 'user'}
+                              <li class="summary-card-folded-item summary-card-folded-{f.role}">
+                                <span class="summary-card-folded-num">{i + 1}</span>
+                                <span class="summary-card-folded-avatar" aria-hidden="true">{isUser ? '👤' : '🌙'}</span>
+                                <span class="summary-card-folded-text" title={f.raw || f.html || ''}>
+                                  {preview}{(f.raw || f.html || '').length > 120 ? '…' : ''}
+                                </span>
+                              </li>
+                            {/each}
+                          </ol>
+                        </div>
+                      {/if}
+                      <div class="summary-card-foot">
+                        <button
+                          class="summary-card-restore"
+                          type="button"
+                          on:click={() => restoreSummary(m.id)}
+                          disabled={!m.foldedMessages || m.foldedMessages.length === 0}
+                          title="Вернуть свёрнутые сообщения в чат"
+                        >↩ Развернуть {m.summaryRange?.count ?? 0} сообщ.</button>
+                        <span class="muted">Сводка экономит ≈{formatTokens(((m.summaryInputTokens || 0) + (m.summaryOutputTokens || 0)) * Math.max(0, (m.summaryRange?.count ?? 1) - 1))} токенов в окне</span>
+                      </div>
+                    {:else}
+                      <div class="summary-card-snippet">
+                        {@html ((m.raw || '') + '').slice(0, 240)}{(m.raw || '').length > 240 ? '…' : ''}
+                      </div>
+                    {/if}
                   </div>
                 {:else if m.kind === 'web_search'}
                   {@const count = m.webResults?.length ?? 0}
@@ -4088,6 +4846,63 @@
               title="Показать то, что реально уходит в модель"
             >📝 Содержимое <span class="context-tab-count">{realContext.length}</span></button>
           </div>
+
+          <!-- Phase UX-3: pinned / attached files in the active
+               context window. Toggling × hides the file from the
+               gauge and from `buildRealContext`; the chat card stays.
+               This is purely a context-window bookkeeping action,
+               NOT a security control. -->
+          {#if filesInContext.length > 0}
+            <div class="ctx-files">
+              <div class="ctx-files-head">
+                <span class="ctx-files-title">📎 Файлы в контексте</span>
+                <span class="ctx-files-count">{filesInContext.length}</span>
+                <button
+                  class="ctx-files-add"
+                  type="button"
+                  on:click={openAttachPicker}
+                  title="Прикрепить файл из workspace"
+                  aria-label="Прикрепить файл"
+                >+</button>
+              </div>
+              <ul class="ctx-files-list">
+                {#each filesInContext as f (f.msgId)}
+                  <li class="ctx-file" class:excluded={f.excludeFromContext}>
+                    <span class="ctx-file-icon">{f.kind === 'file_edit' ? '✎' : '📄'}</span>
+                    <span class="ctx-file-name" title={f.path}>{f.path}</span>
+                    <span class="ctx-file-size">{formatBytes(f.bytes)}{f.lines ? ` · ${f.lines} строк` : ''}</span>
+                    <button
+                      class="ctx-file-toggle"
+                      type="button"
+                      on:click={() => toggleExcludeFromContext(f.msgId)}
+                      title={f.excludeFromContext ? 'Вернуть в контекст' : 'Исключить из контекста (временно)'}
+                      aria-label={f.excludeFromContext ? 'Вернуть в контекст' : 'Исключить'}
+                    >{f.excludeFromContext ? '↩' : '×'}</button>
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {:else}
+            <div class="ctx-files-empty">
+              <span>📎 Нет прикреплённых файлов</span>
+              <button class="ctx-files-add inline" type="button" on:click={openAttachPicker} title="Прикрепить файл из workspace">+</button>
+            </div>
+          {/if}
+
+          <!-- Phase UX-3: when the gauge crosses 80%, suggest
+               summarising instead of letting the user discover the
+               button on their own. We never auto-execute — the
+               decision stays with the user because summary cards
+               are not currently restorable. -->
+          {#if contextInfo.pct >= 80 && messages.length >= 8}
+            <div class="ctx-suggest">
+              <span>⚠ Контекст заполнен на <b>{contextInfo.pct}%</b> — рекомендуется сжать старые сообщения.</span>
+              <button class="ctx-suggest-btn" type="button" on:click={summariseOlder} disabled={summariseBusy}>
+                {summariseBusy ? '⏳ Сжимаю…' : '✨ Сжать сейчас'}
+              </button>
+            </div>
+          {/if}
+
           {#if contextView === 'summary'}
             <div class="context-bar-row">
               <div class="context-bar">
@@ -4193,6 +5008,13 @@
           {/if}
           <div class="context-pop-actions">
             <button class="context-action primary" on:click={() => { contextPopover = false; startNewChat(); }} title="Начать новый чат (текущий сохранится в историю)" type="button">🆕 Новый чат</button>
+            <button
+              class="context-action"
+              on:click={summariseOlder}
+              disabled={busy || summariseBusy || messages.length < 8}
+              title="Свернуть старые сообщения в summary (экономит контекст)"
+              type="button"
+            >{summariseBusy ? '⏳ Сжимаю…' : '📜 Сжать чат'}</button>
             <button class="context-action" on:click={clearContext} title="Очистить контекст в текущем чате" type="button">↺ Очистить</button>
             <span class="context-hint">Esc — закрыть · оценка приблизительная</span>
           </div>
@@ -4277,6 +5099,58 @@
       </div>
     </footer>
   {/if}
+  {/if}
+
+  <!-- Phase UX-3: workspace file picker. Lives at the root of the
+       Chat component so the modal can render on top of everything
+       (including the context popover). Backdrop click + Esc close
+       it; selection fires `attachFile(path)` which appends a
+       `file_read` card. -->
+  {#if attachPickerOpen}
+    <div
+      class="ctx-attach-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Прикрепить файл"
+      on:click|self={closeAttachPicker}
+      on:keydown={(e) => { if (e.key === 'Escape') closeAttachPicker(); }}
+      tabindex="-1"
+    >
+      <div class="ctx-attach" on:click|stopPropagation>
+        <div class="ctx-attach-head">
+          <strong>Прикрепить файл</strong>
+          <button class="link" on:click={closeAttachPicker} title="Закрыть" aria-label="Закрыть">×</button>
+        </div>
+        <p class="ctx-attach-hint muted">
+          Корень workspace: <code>{attachPickerDir}</code>
+        </p>
+        {#if attachPickerLoading}
+          <p class="muted">Загрузка…</p>
+        {:else if attachPickerError}
+          <p class="ctx-attach-err">{attachPickerError}</p>
+        {:else}
+          <ul class="ctx-attach-list">
+            {#each attachPickerFiles as e (e.path)}
+              <li>
+                <button
+                  class="ctx-attach-item"
+                  type="button"
+                  on:click={() => !e.isDir && attachFile(e.path)}
+                  disabled={e.isDir}
+                  title={e.isDir ? 'Папка — откройте её в code-mode' : e.path}
+                >
+                  <span class="ctx-attach-icon">{e.isDir ? '📁' : '📄'}</span>
+                  <span class="ctx-attach-name">{e.path}</span>
+                  {#if e.size != null}
+                    <span class="ctx-attach-size">{formatBytes(e.size)}</span>
+                  {/if}
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+    </div>
   {/if}
 
   {#if modelPanelOpen}
@@ -4418,9 +5292,30 @@
   .seg {
     background: transparent; color: #b6bcc7; border: 1px solid transparent;
     padding: 5px 10px; font-size: 12px; font-weight: 500; border-radius: 6px; cursor: pointer;
+    font-family: inherit;
+    display: inline-flex; align-items: center; justify-content: center;
   }
   .seg:hover { color: #e6e8eb; background: #252932; }
   .seg.on { color: #e6e8eb; background: #0f1217; border-color: #2c313a; }
+
+  /* Icon-only mode tabs (Chat / Code / Research / Media / Plan).
+     Square 28x28, no text — the label is the title attribute and
+     shows up on hover as a native tooltip. */
+  .seg-icon {
+    width: 28px; height: 28px; padding: 0;
+    position: relative;
+  }
+  .seg-icon :global(svg) { display: block; }
+  .seg-badge {
+    position: absolute;
+    top: -3px; right: -3px;
+    min-width: 14px; height: 14px;
+    padding: 0 3px;
+    border-radius: 7px;
+    background: #c9a0a0; color: #1c1f26;
+    font-size: 9px; font-weight: 600;
+    line-height: 14px; text-align: center;
+  }
 
   .ico {
     background: transparent; border: 1px solid #2c313a; color: #b6bcc7;
@@ -4549,6 +5444,50 @@
   }
   .msg-row.assistant .msg-bubble {
     border-bottom-left-radius: 4px;
+  }
+
+  /* Clickable links inside chat bubbles. The markdown renderer
+     tags every <a> with `data-url` so we can style them here and
+     intercept clicks in `onMessagesClick` (see handler above).
+     The custom indicator is a small ↗ so the user immediately
+     sees "this opens in the right sidebar" — not in the chat
+     bubble itself, not in the OS browser. */
+  .msg-bubble a[data-url] {
+    color: var(--accent, #4a6fcf);
+    text-decoration: underline;
+    text-decoration-color: rgba(74, 111, 207, 0.4);
+    text-underline-offset: 2px;
+    cursor: pointer;
+    word-break: break-word;
+    transition: color 0.12s, text-decoration-color 0.12s, background 0.12s;
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+  .msg-bubble a[data-url]:hover {
+    color: var(--accent-strong, #3557b8);
+    text-decoration-color: var(--accent-strong, #3557b8);
+    background: var(--accent-soft, rgba(74, 111, 207, 0.10));
+  }
+  .msg-bubble a[data-url]:active { background: var(--accent-soft, rgba(74, 111, 207, 0.18)); }
+  .msg-bubble a[data-url]::after {
+    content: ' ↗';
+    font-size: 0.85em;
+    opacity: 0.55;
+    margin-left: 1px;
+  }
+  /* Web-search results (rendered in their own <ul>) get the same
+     treatment so the user learns one affordance. */
+  .web-search-link,
+  .subagent-list a {
+    color: var(--accent, #4a6fcf);
+    text-decoration: underline;
+    text-decoration-color: rgba(74, 111, 207, 0.4);
+    text-underline-offset: 2px;
+  }
+  .web-search-link:hover,
+  .subagent-list a:hover {
+    color: var(--accent-strong, #3557b8);
+    background: var(--accent-soft, rgba(74, 111, 207, 0.10));
   }
   /* Assistant text that follows a tool card gets a thin accent stripe
      on the left + a soft tinted background. Makes the
@@ -4684,7 +5623,44 @@
   .think-label { flex: 1; display: inline-flex; align-items: center; gap: 6px; }
   .think-chevron { font-size: 10px; opacity: 0.7; }
   .think-spinner { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--think-spin-track); border-top-color: var(--think-fg); border-radius: 50%; animation: tool-spin 0.7s linear infinite; }
-  .think-body { padding: 8px 12px 10px; font-size: 12px; line-height: 1.5; color: var(--think-fg-soft); font-style: italic; border-top: 1px solid var(--think-border); white-space: pre-wrap; word-wrap: break-word; max-height: 320px; overflow-y: auto; }
+  .think-body { padding: 8px 12px 10px; font-size: 12px; line-height: 1.5; color: var(--think-fg-soft); font-style: italic; border-top: 1px solid var(--think-border); white-space: normal; word-wrap: break-word; max-height: 320px; overflow-y: auto; }
+  /* The body now contains rendered HTML (markdown.ts) so we strip the
+     default margins on <p> children — italic + smaller font already
+     provide the visual separation. */
+  .think-body :global(p) { margin: 0 0 6px 0; }
+  .think-body :global(p:last-child) { margin-bottom: 0; }
+  .think-body :global(strong) { color: var(--think-fg); }
+  .think-body :global(code) { background: rgba(0, 0, 0, 0.10); padding: 0 4px; border-radius: 3px; font-size: 11px; }
+
+  /* ---- Inline <think>…</think> block (Phase UX-3) ----
+     The model sometimes emits its reasoning inline instead of using
+     the separate `reasoning_content` channel. markdown.ts converts
+     those tags into <aside class="think-inline">…</aside> between
+     paragraphs, so we can style it independently from the regular
+     prose around it. The italic + muted colour + left border make
+     it visually obvious which part of the answer is reasoning. */
+  .think-inline {
+    display: block;
+    margin: 8px 0;
+    padding: 8px 10px 8px 14px;
+    background: var(--think-bg, rgba(122, 158, 207, 0.10));
+    border: 1px solid var(--think-border, rgba(122, 158, 207, 0.30));
+    border-left: 3px solid var(--think-fg, #9ab8d8);
+    border-radius: 6px;
+    font-style: italic;
+    color: var(--think-fg-soft, #b6c2d3);
+    font-size: 12px;
+    line-height: 1.55;
+    /* The block-level aside must escape any <p> wrapper the inline
+       parser injected around it. We use overflow-wrap to avoid
+       M3-token-boundary runs like "The user justsaid" wrapping
+       mid-word. */
+    overflow-wrap: break-word;
+    word-break: normal;
+  }
+  .think-inline-body { display: inline; }
+  .think-inline :global(p) { margin: 0 0 4px 0; display: inline; }
+  .think-inline :global(p:last-child) { margin-bottom: 0; }
 
   .msg.image-msg { padding: 0; overflow: hidden; }
   .msg.image-msg .role { padding: 8px 14px 0; }
@@ -4904,6 +5880,338 @@
   .plan-step-marker { flex: 0 0 18px; text-align: center; font-family: ui-monospace, 'Cascadia Code', Menlo, monospace; color: #6c7280; }
   .plan-step-title { flex: 1; color: #cfd3da; }
   .plan-step-note { color: #8a93a6; font-size: 11px; font-style: italic; }
+
+  /* ---- summary-card (Phase UX-3) ---- */
+  .summary-card {
+    margin: 6px 0;
+    background: rgba(122, 158, 207, 0.08);
+    border: 1px solid rgba(122, 158, 207, 0.25);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .summary-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+  .summary-card-head:hover { background: rgba(122, 158, 207, 0.10); }
+  .summary-card-icon { font-size: 14px; }
+  .summary-card-title { font-size: 12px; font-weight: 500; flex: 1; }
+  .summary-card-meta {
+    font-size: 10.5px;
+    color: var(--text-muted, #6b6b70);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .summary-card-model {
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--text-muted, #6b6b70);
+    padding: 0 5px;
+    border-radius: 6px;
+    font-size: 9.5px;
+  }
+  .summary-card-chevron { color: var(--text-muted, #6b6b70); }
+  .summary-card-snippet {
+    padding: 6px 12px 10px;
+    font-size: 11.5px;
+    color: var(--text-muted, #6b6b70);
+    line-height: 1.5;
+  }
+  .summary-card-body {
+    padding: 6px 12px 10px;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .summary-card-foot {
+    padding: 6px 12px 10px;
+    border-top: 1px dashed rgba(122, 158, 207, 0.2);
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .summary-card-foot .muted { color: #b65a00; }
+  .summary-card-restore {
+    border: 1px solid rgba(122, 158, 207, 0.4);
+    background: rgba(122, 158, 207, 0.10);
+    color: #9ab8d8;
+    padding: 4px 10px;
+    border-radius: 999px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 11px;
+    transition: background 120ms ease, color 120ms ease;
+  }
+  .summary-card-restore:hover:not(:disabled) {
+    background: rgba(122, 158, 207, 0.20);
+    color: #c0d4ec;
+  }
+  .summary-card-restore:disabled { opacity: 0.4; cursor: not-allowed; }
+  .summary-card-folded {
+    margin: 6px 12px 0;
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.15);
+    border: 1px solid rgba(122, 158, 207, 0.15);
+    border-radius: 6px;
+  }
+  .summary-card-folded-head {
+    font-size: 10.5px;
+    color: var(--text-muted, #6b6b70);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .summary-card-folded-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .summary-card-folded-item {
+    display: grid;
+    grid-template-columns: 22px 16px 1fr;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+    font-size: 11.5px;
+    line-height: 1.4;
+  }
+  .summary-card-folded-num {
+    color: var(--text-muted, #6b6b70);
+    font-size: 10px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .summary-card-folded-avatar {
+    text-align: center;
+    opacity: 0.85;
+  }
+  .summary-card-folded-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+  }
+  .summary-card-folded-user .summary-card-folded-text { color: #b6c2d3; }
+  .summary-card-folded-assistant .summary-card-folded-text { color: #9ab8d8; }
+
+  /* ---- ctx-files (Phase UX-3) ---- */
+  .ctx-files {
+    margin: 8px 0 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    padding-top: 8px;
+  }
+  .ctx-files-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 4px 4px;
+  }
+  .ctx-files-title { font-size: 12px; font-weight: 500; flex: 1; }
+  .ctx-files-count {
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--text-muted, #6b6b70);
+    padding: 0 6px;
+    border-radius: 8px;
+    font-size: 10px;
+    line-height: 16px;
+  }
+  .ctx-files-add {
+    width: 22px; height: 22px;
+    border: 1px solid var(--border, #2c313a);
+    background: transparent;
+    color: var(--text-muted, #6b6b70);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .ctx-files-add:hover { background: rgba(74, 111, 207, 0.12); color: #4a6fcf; }
+  .ctx-files-add.inline { width: 18px; height: 18px; font-size: 12px; }
+  .ctx-files-empty {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 4px 0;
+    margin-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 11px;
+    color: var(--text-muted, #6b6b70);
+  }
+  .ctx-files-list {
+    list-style: none;
+    margin: 0;
+    padding: 0 4px;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .ctx-file {
+    display: grid;
+    grid-template-columns: 18px 1fr auto 24px;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+    font-size: 11.5px;
+  }
+  .ctx-file.excluded { opacity: 0.45; }
+  .ctx-file-icon { color: var(--text-muted, #6b6b70); text-align: center; }
+  .ctx-file-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+  }
+  .ctx-file-size {
+    color: var(--text-muted, #6b6b70);
+    font-size: 10px;
+    flex-shrink: 0;
+  }
+  .ctx-file-toggle {
+    width: 22px; height: 22px;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted, #6b6b70);
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+  }
+  .ctx-file-toggle:hover { background: rgba(176, 48, 48, 0.1); color: #b03030; }
+
+  /* ---- ctx-suggest (Phase UX-3) — auto-summarise nudge at >= 80% ---- */
+  .ctx-suggest {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 4px 0;
+    padding: 6px 10px;
+    background: rgba(224, 122, 122, 0.10);
+    border: 1px solid rgba(224, 122, 122, 0.3);
+    border-radius: 6px;
+    font-size: 11.5px;
+    color: #f5b56b;
+  }
+  .ctx-suggest-btn {
+    border: 0;
+    background: #c9a0a0;
+    color: #1c1f26;
+    padding: 4px 10px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 11px;
+    font-family: inherit;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+  .ctx-suggest-btn:hover:not(:disabled) { background: #d8b0b0; }
+  .ctx-suggest-btn:disabled { opacity: 0.5; cursor: wait; }
+
+  /* ---- ctx-attach modal (Phase UX-3) ---- */
+  .ctx-attach-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 60;
+  }
+  .ctx-attach {
+    background: var(--bg-elevated, #1c1f26);
+    border: 1px solid var(--border, #2c313a);
+    border-radius: 10px;
+    padding: 16px;
+    width: min(480px, calc(100vw - 40px));
+    max-height: 70vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  .ctx-attach-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .ctx-attach-head strong { font-size: 14px; }
+  .ctx-attach-head .link {
+    background: transparent;
+    border: 0;
+    color: var(--text-muted, #6b6b70);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0 8px;
+  }
+  .ctx-attach-hint { font-size: 11px; margin: 0 0 8px 0; }
+  .ctx-attach-hint code {
+    font-family: ui-monospace, monospace;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 0 4px;
+    border-radius: 3px;
+    font-size: 10.5px;
+  }
+  .ctx-attach-err {
+    background: rgba(176, 48, 48, 0.10);
+    border: 1px solid #b03030;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 11px;
+    color: #f5b56b;
+  }
+  .ctx-attach-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+  }
+  .ctx-attach-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 5px 8px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    border-radius: 4px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .ctx-attach-item:hover:not(:disabled) { background: rgba(74, 111, 207, 0.10); }
+  .ctx-attach-item:disabled { color: var(--text-muted, #6b6b70); cursor: default; }
+  .ctx-attach-icon { font-size: 14px; flex-shrink: 0; }
+  .ctx-attach-name {
+    flex: 1;
+    font-family: ui-monospace, monospace;
+    font-size: 11.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ctx-attach-size {
+    color: var(--text-muted, #6b6b70);
+    font-size: 10.5px;
+    flex-shrink: 0;
+  }
   .plan-step-done .plan-step-marker { color: #9ec4a8; }
   .plan-step-done .plan-step-title { color: #7d8590; text-decoration: line-through; text-decoration-color: rgba(125, 133, 144, 0.5); }
   .plan-step-in_progress .plan-step-marker { color: #d8c89a; animation: plan-pulse 1.4s ease-in-out infinite; }
@@ -5367,6 +6675,13 @@
   .icon-btn.active { background: rgba(208, 64, 64, 0.18); color: #ff8a8a; animation: vpulse 1.2s ease-in-out infinite; }
   .icon-btn.transcribing { background: rgba(208, 144, 64, 0.18); color: #ffc88a; }
   .icon-btn.error { background: rgba(106, 26, 26, 0.4); color: #ffaaaa; }
+  /* TTS toggle: subtle indicator (off / on / actively playing). */
+  .icon-btn.tts-btn.on { color: var(--accent, #c9a0a0); }
+  .icon-btn.tts-btn.speaking { animation: ttspulse 1.6s ease-in-out infinite; }
+  @keyframes ttspulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.08); }
+  }
   @keyframes vpulse { 0% { box-shadow: 0 0 0 0 rgba(208, 64, 64, 0.55); } 50% { box-shadow: 0 0 0 10px rgba(208, 64, 64, 0.15); } 100% { box-shadow: 0 0 0 10px rgba(208, 64, 64, 0); } }
   /* Multitask mode button — purple/indigo accent so it doesn't clash with
      the red voice-recording `.active` state. Off = the same muted gray as
