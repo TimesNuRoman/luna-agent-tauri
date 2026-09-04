@@ -588,6 +588,42 @@ export async function onPersonaSlashFired(
   return listen<PersonaSlashTrigger>('persona:slash-fired', (e) => cb(e.payload));
 }
 
+// ---------- Azazel Vault (Phase UX-2) ----------
+//
+// LLM-safe credentials. The model can read the public projection
+// (`login` + `has_password` boolean) but never the actual secret —
+// the password is only ever injected into the browser session by
+// the server-side Azazel supervisor.
+
+export interface VaultEntryPublic {
+  domain: string;
+  login: string;
+  has_password: boolean;
+  updated_at: string;
+}
+
+export async function vaultList(): Promise<VaultEntryPublic[]> {
+  return invoke<VaultEntryPublic[]>('vault_list');
+}
+
+export async function vaultSet(
+  domain: string,
+  login: string,
+  password: string,
+): Promise<void> {
+  await invoke('vault_set', { domain, login, password });
+}
+
+export async function vaultDelete(domain: string): Promise<void> {
+  await invoke('vault_delete', { domain });
+}
+
+export async function vaultGetPublic(
+  domain: string,
+): Promise<VaultEntryPublic | null> {
+  return invoke<VaultEntryPublic | null>('vault_get_public', { domain });
+}
+
 // ---- persona DTOs (mirror the Rust types) ----
 
 export interface PersonaSummaryDto {

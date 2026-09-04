@@ -2288,7 +2288,7 @@ fn luna_tools_schema() -> serde_json::Value {
             "type": "function",
             "function": {
                 "name": "azazel_run",
-                "description": "Dispatch a browser-automation task to Azazel, Luna's autonomous browser agent. Azazel opens a real Chromium tab, navigates, clicks, types, extracts, and reports back. Use this for ANY task that requires interacting with a website: logging in (social media, banking, SaaS, email), filling forms, posting content (status updates, comments, images), scraping structured data from logged-in pages, multi-step web workflows. Returns a task_id immediately; the actual run is async and streams live screenshots / action timeline through the chat aug card. Do NOT call for static read-only fetches (use web_search or fetch_url for that). Do NOT call for local file or shell work (use read_file / run_command). For an empty Azazel session (no live run), the user can also type /azazel <prompt> in chat to start one manually. If the task needs login or API tokens, pass them via the `credentials` field — that field references credential SLOTS stored on the user's machine (e.g. vk.com/username), NOT raw secrets. The model never sees the actual passwords; the backend resolves the slots and injects the values into the browser session only.",
+                "description": "Dispatch a browser-automation task to Azazel, Luna's autonomous browser agent. Azazel opens a real Chromium tab, navigates, clicks, types, extracts, and reports back. Use this for ANY task that requires interacting with a website: logging in (social media, banking, SaaS, email), filling forms, posting content (status updates, comments, images), scraping structured data from logged-in pages, multi-step web workflows. Returns a task_id immediately; the actual run is async and streams live screenshots / action timeline through the chat aug card. Do NOT call for static read-only fetches (use web_search or fetch_url for that). Do NOT call for local file or shell work (use read_file / run_command). For an empty Azazel session (no live run), the user can also type /azazel <prompt> in chat to start one manually. If the task needs login credentials, the recommended path is `vault_domain` (e.g. 'vk.com'): Luna looks the entry up server-side from Settings → Vault and injects login + password into the browser session — the model never sees the password. The legacy `credentials` slot-based field still works for multi-credential flows and account creation.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -2300,13 +2300,34 @@ fn luna_tools_schema() -> serde_json::Value {
                             "type": "string",
                             "description": "Short human-readable label for the task (<= 60 chars). Shows in the chat aug card and the Azazel panel."
                         },
+                        "vault_domain": {
+                            "type": "string",
+                            "description": "Optional. Domain whose saved login + password should be injected into the browser session (e.g. 'vk.com', 'github.com'). Luna looks the entry up server-side from Settings → Vault; the password is never returned to the model. If unset and the target site needs login, the user will be asked to log in interactively (or the task will fail at the login form). Use get_user_secrets(domain) first to check whether a credential is configured."
+                        },
                         "credentials": {
                             "type": "object",
-                            "description": "Map of {label: slot_name} where each value is a credential SLOT (e.g. 'vk.com/username', 'github.com/token'), not the actual value. Keys are how you refer to the credential in your prompt and tool calls (e.g. 'use {{credentials.username}} to log in'). Missing slots are reported as errors. The user adds slots via the 🔑 Credentials button in the chat input area; the chat UI's list tool shows available slot names.",
+                            "description": "Map of {label: slot_name} for multi-credential flows (e.g. login + 2FA token). Each value is a credential SLOT, not the actual value. Missing slots are reported as errors. Prefer `vault_domain` for simple single-login flows; use `credentials` only when you need multiple distinct secrets for the same task.",
                             "additionalProperties": { "type": "string" }
                         }
                     },
                     "required": ["prompt"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_user_secrets",
+                "description": "Read the LLM-safe public projection of a Vault entry for a domain. Returns the saved login + a boolean has_password. The actual password is NEVER returned — it lives in the OS keyring on the user's machine and is only injected into the browser session server-side when azazel_run is called with a matching vault_domain. Use this before azazel_run to confirm a credential is configured for the target site, or to remind yourself which login the user has on that platform. Returns has_password=false if no entry exists for the domain (then tell the user to add one via Settings → Vault).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "domain": {
+                            "type": "string",
+                            "description": "Domain to look up, e.g. 'vk.com' or 'github.com'. Normalised server-side: lowercased, scheme and leading 'www.' stripped, path removed."
+                        }
+                    },
+                    "required": ["domain"]
                 }
             }
         },
@@ -4304,6 +4325,62 @@ async fn minimax_chat_stream(
                                 }
                             }
                         }
+                        // Optional Vault hint: when the model names a
+                        // domain (vk.com, github.com, etc) we resolve
+                        // the entry from the OS keyring and stash the
+                        // login + password under well-known labels so
+                        // the Azazel supervisor can type them into the
+                        // browser session at login time. The model
+                        // never sees the resolved value.
+                        let vault_domain = args
+                            .get("vault_domain")
+                            .and_then(|d| d.as_str())
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty());
+                        if let Some(domain) = vault_domain.as_deref() {
+                            match secrets::vault_get_credential(domain) {
+                                Ok(Some(entry)) => {
+                                    resolved_secrets
+                                        .insert(format!("vault:login:{domain}"), entry.login);
+                                    resolved_secrets
+                                        .insert(format!("vault:password:{domain}"), entry.password);
+                                }
+                                Ok(None) => {
+                                    let tool_msg = serde_json::json!({
+                                        "role": "tool",
+                                        "tool_call_id": id,
+                                        "content": format!(
+                                            "No credential stored for `{domain}`. \
+                                             Ask the user to add one via Settings → Vault, \
+                                             or call get_user_secrets('{domain}') to list \
+                                             configured domains."
+                                        ),
+                                    });
+                                    messages.push(tool_msg);
+                                    let _ = app.emit("ai_tool_result", serde_json::json!({
+                                        "id": id, "name": name, "ok": false,
+                                        "error": format!("no vault entry for {domain}"),
+                                    }));
+                                    continue;
+                                }
+                                Err(e) => {
+                                    let tool_msg = serde_json::json!({
+                                        "role": "tool",
+                                        "tool_call_id": id,
+                                        "content": format!(
+                                            "Vault error reading `{domain}`: {e}. \
+                                             The task was not started."
+                                        ),
+                                    });
+                                    messages.push(tool_msg);
+                                    let _ = app.emit("ai_tool_result", serde_json::json!({
+                                        "id": id, "name": name, "ok": false,
+                                        "error": format!("vault: {e}"),
+                                    }));
+                                    continue;
+                                }
+                            }
+                        }
                         if !missing.is_empty() {
                             let tool_msg = serde_json::json!({
                                 "role": "tool",
@@ -4491,6 +4568,82 @@ async fn minimax_chat_stream(
                                     "role": "tool",
                                     "tool_call_id": id,
                                     "content": format!("Error: {e}"),
+                                });
+                                messages.push(tool_msg);
+                            }
+                        }
+                        continue;
+                    }
+                    // ------------------------------------------------------------
+                    // Vault lookup. LLM-safe: returns only the login +
+                    // a `has_password` boolean. The actual password
+                    // never leaves `secrets::vault_get_credential` —
+                    // it's only ever injected into the browser session
+                    // by the Azazel supervisor.
+                    // ------------------------------------------------------------
+                    if name == "get_user_secrets" {
+                        let args: serde_json::Value = serde_json::from_str(args_str)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        let domain = args
+                            .get("domain")
+                            .and_then(|d| d.as_str())
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        if domain.is_empty() {
+                            let tool_msg = serde_json::json!({
+                                "role": "tool",
+                                "tool_call_id": id,
+                                "content": "Error: get_user_secrets requires a non-empty `domain`.",
+                            });
+                            messages.push(tool_msg);
+                            continue;
+                        }
+                        let _ = app.emit(
+                            "ai_tool_use",
+                            serde_json::json!({
+                                "id": id, "name": name, "args": { "domain": &domain },
+                            }),
+                        );
+                        match secrets::vault_get_public(&domain) {
+                            Ok(Some(entry)) => {
+                                let tool_msg = serde_json::json!({
+                                    "role": "tool",
+                                    "tool_call_id": id,
+                                    "content": format!(
+                                        "Vault entry for `{}`: login=`{}`, has_password={}. \
+                                         You can call azazel_run with vault_domain=\"{}\" to \
+                                         inject the saved login + password into the browser session.",
+                                        entry.domain, entry.login, entry.has_password, entry.domain
+                                    ),
+                                });
+                                messages.push(tool_msg);
+                                let _ = app.emit("ai_tool_result", serde_json::json!({
+                                    "id": id, "name": name, "ok": true,
+                                    "domain": entry.domain, "login": entry.login,
+                                    "has_password": entry.has_password,
+                                }));
+                            }
+                            Ok(None) => {
+                                let tool_msg = serde_json::json!({
+                                    "role": "tool",
+                                    "tool_call_id": id,
+                                    "content": format!(
+                                        "No Vault entry for `{}`. Ask the user to add one via Settings → Vault, or run the task without vault_domain and let the user log in interactively.",
+                                        domain
+                                    ),
+                                });
+                                messages.push(tool_msg);
+                                let _ = app.emit("ai_tool_result", serde_json::json!({
+                                    "id": id, "name": name, "ok": true,
+                                    "domain": domain, "has_password": false, "found": false,
+                                }));
+                            }
+                            Err(e) => {
+                                let tool_msg = serde_json::json!({
+                                    "role": "tool",
+                                    "tool_call_id": id,
+                                    "content": format!("Vault error: {e}"),
                                 });
                                 messages.push(tool_msg);
                             }
@@ -6488,6 +6641,47 @@ fn set_telegram_token(token: String) -> Result<(), String> {
 #[tauri::command]
 fn clear_telegram_token() -> Result<(), String> {
     secrets::clear_telegram_token()
+}
+
+// ----- Azazel Vault ---------------------------------------------------
+//
+// The Vault stores per-platform login + password in the OS keyring.
+// The Tauri command surface is split into a public side (safe to
+// surface to the UI / the LLM) and a server-side only side used by
+// the Azazel supervisor. The LLM only ever sees the public side
+// (login + a boolean), so it can name a domain in `azazel_run` and
+// rely on the supervisor to inject the actual password into the
+// browser session.
+
+#[tauri::command]
+fn vault_set(
+    domain: String,
+    login: String,
+    password: String,
+) -> Result<(), String> {
+    secrets::vault_set(&domain, &login, &password)?;
+    secrets::vault_index_add(&domain)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn vault_list() -> Result<Vec<secrets::VaultEntryPublic>, String> {
+    secrets::vault_list()
+}
+
+#[tauri::command]
+fn vault_delete(domain: String) -> Result<(), String> {
+    secrets::vault_delete(&domain)?;
+    secrets::vault_index_remove(&domain)?;
+    Ok(())
+}
+
+/// LLM-safe read. Returns the login + a `has_password` boolean.
+/// **Never** returns the password itself. This is what the
+/// `get_user_secrets` model tool calls.
+#[tauri::command]
+fn vault_get_public(domain: String) -> Result<Option<secrets::VaultEntryPublic>, String> {
+    secrets::vault_get_public(&domain)
 }
 
 #[tauri::command]
@@ -9481,6 +9675,11 @@ pub fn run() {
             get_telegram_status,
             set_telegram_token,
             clear_telegram_token,
+            // Azazel Vault
+            vault_set,
+            vault_list,
+            vault_delete,
+            vault_get_public,
             set_telegram_allow_list,
             start_telegram_bot,
             stop_telegram_bot,

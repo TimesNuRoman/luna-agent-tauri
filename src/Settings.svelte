@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { onMount, tick } from 'svelte';
   import { apiKeyStatus, refreshKeyStatus, saveKey, clearKey } from './lib/keyStore';
   import TelegramBot from './TelegramBot.svelte';
@@ -8,19 +8,23 @@
     removeShellCommand,
     resetShellAllowList,
     type ShellAllowList,
+    vaultList,
+    vaultSet,
+    vaultDelete,
+    type VaultEntryPublic,
   } from './lib/tauri';
 
   // Theme props from App.svelte
   export let theme: 'light' | 'dark' | 'auto' = 'light';
   export let setTheme: (t: 'light' | 'dark' | 'auto') => void = () => {};
 
-  type SectionId = 'api' | 'theme' | 'model' | 'interests' | 'voice' | 'telegram' | 'shell' | 'self_evolution' | 'about';
+  type SectionId = 'api' | 'theme' | 'model' | 'interests' | 'voice' | 'telegram' | 'vault' | 'shell' | 'self_evolution' | 'about';
   let activeSection: SectionId = 'api';
   let searchQuery = '';
 
   // ---- API key ----
   // Status now comes from the shared keyStore so the "set/missing" badge
-  // here, the 🔑 pill in App.svelte, and the chat composer placeholder
+  // here, the рџ”‘ pill in App.svelte, and the chat composer placeholder
   // all reflect the same source.
   $: hasMinimax = $apiKeyStatus === 'present';
   $: checking = $apiKeyStatus === 'unknown';
@@ -83,65 +87,73 @@
     {
       id: 'api',
       label: 'API Keys',
-      icon: '🔑',
-      desc: 'MiniMax-ключ для запросов к модели',
-      keywords: ['api', 'key', 'ключ', 'minimax', 'token'],
+      icon: 'рџ”‘',
+      desc: 'MiniMax-РєР»СЋС‡ РґР»СЏ Р·Р°РїСЂРѕСЃРѕРІ Рє РјРѕРґРµР»Рё',
+      keywords: ['api', 'key', 'РєР»СЋС‡', 'minimax', 'token'],
     },
     {
       id: 'theme',
       label: 'Theme',
-      icon: '🎨',
-      desc: 'Светлая, тёмная или авто (как в системе)',
-      keywords: ['theme', 'appearance', 'color', 'dark', 'light', 'тема', 'цвет', 'оформление', 'внешний вид'],
+      icon: 'рџЋЁ',
+      desc: 'РЎРІРµС‚Р»Р°СЏ, С‚С‘РјРЅР°СЏ РёР»Рё Р°РІС‚Рѕ (РєР°Рє РІ СЃРёСЃС‚РµРјРµ)',
+      keywords: ['theme', 'appearance', 'color', 'dark', 'light', 'С‚РµРјР°', 'С†РІРµС‚', 'РѕС„РѕСЂРјР»РµРЅРёРµ', 'РІРЅРµС€РЅРёР№ РІРёРґ'],
     },
     {
       id: 'model',
       label: 'Model',
-      icon: '🧠',
-      desc: 'Модель по умолчанию для чата',
-      keywords: ['model', 'модель', 'ai', 'llm', 'm2', 'm3', 'text'],
+      icon: 'рџ§ ',
+      desc: 'РњРѕРґРµР»СЊ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ РґР»СЏ С‡Р°С‚Р°',
+      keywords: ['model', 'РјРѕРґРµР»СЊ', 'ai', 'llm', 'm2', 'm3', 'text'],
     },
     {
       id: 'interests',
       label: 'News Interests',
-      icon: '📰',
-      desc: 'Темы для автоподбора в News-режиме',
-      keywords: ['news', 'interests', 'новости', 'темы', 'интересы', 'feed', 'rss'],
+      icon: 'рџ“°',
+      desc: 'РўРµРјС‹ РґР»СЏ Р°РІС‚РѕРїРѕРґР±РѕСЂР° РІ News-СЂРµР¶РёРјРµ',
+      keywords: ['news', 'interests', 'РЅРѕРІРѕСЃС‚Рё', 'С‚РµРјС‹', 'РёРЅС‚РµСЂРµСЃС‹', 'feed', 'rss'],
     },
     {
       id: 'voice',
       label: 'Voice & STT',
-      icon: '🎙',
-      desc: 'Распознавание речи и хоткеи (в разработке)',
-      keywords: ['voice', 'stt', 'whisper', 'голос', 'микрофон', 'speech', 'mic'],
+      icon: 'рџЋ™',
+      desc: 'Р Р°СЃРїРѕР·РЅР°РІР°РЅРёРµ СЂРµС‡Рё Рё С…РѕС‚РєРµРё (РІ СЂР°Р·СЂР°Р±РѕС‚РєРµ)',
+      keywords: ['voice', 'stt', 'whisper', 'РіРѕР»РѕСЃ', 'РјРёРєСЂРѕС„РѕРЅ', 'speech', 'mic'],
     },
     {
       id: 'telegram',
       label: 'Telegram Bot',
-      icon: '🤖',
-      desc: 'Управление ботом для удалённого доступа к агенту',
-      keywords: ['telegram', 'bot', 'tg', 'телеграм', 'remote', 'удалённо'],
+      icon: 'рџ¤–',
+      desc: 'РЈРїСЂР°РІР»РµРЅРёРµ Р±РѕС‚РѕРј РґР»СЏ СѓРґР°Р»С‘РЅРЅРѕРіРѕ РґРѕСЃС‚СѓРїР° Рє Р°РіРµРЅС‚Сѓ',
+      keywords: ['telegram', 'bot', 'tg', 'С‚РµР»РµРіСЂР°Рј', 'remote', 'СѓРґР°Р»С‘РЅРЅРѕ'],
+    },
+    {
+      id: 'vault',
+      label: 'рџ”ђ Vault',
+      icon: 'рџ”ђ',
+      desc: 'Р›РѕРіРёРЅС‹ Рё РїР°СЂРѕР»Рё РґР»СЏ Azazel (С…СЂР°РЅСЏС‚СЃСЏ РІ OS keyring, LLM РёС… РЅРµ РІРёРґРёС‚)',
+      keywords: ['vault', 'password', 'credentials', 'login', 'azazel', 'browser',
+                 'РїР°СЂРѕР»СЊ', 'Р»РѕРіРёРЅ', 'РєР»СЋС‡', 'credentials', 'secret', 'keyring'],
     },
     {
       id: 'shell',
       label: 'Shell',
-      icon: '🖥',
-      desc: 'Allow-list системных команд (PowerShell, bash, cmd, cargo, git…)',
-      keywords: ['shell', 'bash', 'powershell', 'cmd', 'pwsh', 'terminal', 'шелл', 'командная строка'],
+      icon: 'рџ–Ґ',
+      desc: 'Allow-list СЃРёСЃС‚РµРјРЅС‹С… РєРѕРјР°РЅРґ (PowerShell, bash, cmd, cargo, gitвЂ¦)',
+      keywords: ['shell', 'bash', 'powershell', 'cmd', 'pwsh', 'terminal', 'С€РµР»Р»', 'РєРѕРјР°РЅРґРЅР°СЏ СЃС‚СЂРѕРєР°'],
     },
     {
       id: 'self_evolution',
       label: 'Self-evolution',
-      icon: '🧬',
-      desc: 'Luna читает и улучшает собственные исходники (E0–E4)',
-      keywords: ['self', 'evolution', 'evolver', 'snapshot', 'sandbox', 'update', 'rollback', 'apply', 'luna', 'самоулучшение', 'эволюция', 'обновление'],
+      icon: 'рџ§¬',
+      desc: 'Luna С‡РёС‚Р°РµС‚ Рё СѓР»СѓС‡С€Р°РµС‚ СЃРѕР±СЃС‚РІРµРЅРЅС‹Рµ РёСЃС…РѕРґРЅРёРєРё (E0вЂ“E4)',
+      keywords: ['self', 'evolution', 'evolver', 'snapshot', 'sandbox', 'update', 'rollback', 'apply', 'luna', 'СЃР°РјРѕСѓР»СѓС‡С€РµРЅРёРµ', 'СЌРІРѕР»СЋС†РёСЏ', 'РѕР±РЅРѕРІР»РµРЅРёРµ'],
     },
     {
       id: 'about',
       label: 'About',
-      icon: 'ℹ',
-      desc: 'О приложении и подсказки',
-      keywords: ['about', 'info', 'version', 'о приложении', 'помощь', 'help'],
+      icon: 'в„№',
+      desc: 'Рћ РїСЂРёР»РѕР¶РµРЅРёРё Рё РїРѕРґСЃРєР°Р·РєРё',
+      keywords: ['about', 'info', 'version', 'Рѕ РїСЂРёР»РѕР¶РµРЅРёРё', 'РїРѕРјРѕС‰СЊ', 'help'],
     },
   ];
 
@@ -193,7 +205,7 @@
     }
   }
   async function removeCmd(name: string) {
-    if (!confirm(`Удалить "${name}" из allow-list?`)) return;
+    if (!confirm(`РЈРґР°Р»РёС‚СЊ "${name}" РёР· allow-list?`)) return;
     shellBusy = true;
     try {
       shellList = await removeShellCommand(name);
@@ -204,7 +216,7 @@
     }
   }
   async function resetShellList() {
-    if (!confirm('Сбросить allow-list к встроенным дефолтам?')) return;
+    if (!confirm('РЎР±СЂРѕСЃРёС‚СЊ allow-list Рє РІСЃС‚СЂРѕРµРЅРЅС‹Рј РґРµС„РѕР»С‚Р°Рј?')) return;
     shellBusy = true;
     try {
       shellList = await resetShellAllowList();
@@ -215,7 +227,7 @@
     }
   }
 
-  // (removed) `refreshKey()` — the shared `refreshKeyStatus()` from
+  // (removed) `refreshKey()` вЂ” the shared `refreshKeyStatus()` from
   // keyStore does the IPC read and updates `apiKeyStatus` reactively.
   // `checking` and `hasMinimax` are now `$:`-derived from that store.
 
@@ -237,18 +249,80 @@
   $: if (typeof localStorage !== 'undefined') saveVad();
 
   // Refresh the shell list when the user actually opens the section
-  // — picks up edits made in another window or by the bot.
+  // вЂ” picks up edits made in another window or by the bot.
   $: if (activeSection === 'shell' && !shellList) refreshShellList();
+
+  // ---- Vault (Azazel credentials) ----
+  let vaultEntries: VaultEntryPublic[] = [];
+  let vaultLoaded = false;
+  let vaultLoading = false;
+  let vaultDraft: { domain: string; login: string; password: string } = {
+    domain: '',
+    login: '',
+    password: '',
+  };
+  let vaultRevealed: Record<string, boolean> = {};
+  let vaultError = '';
+  let vaultSavedFlash = '';
+  let vaultSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  async function refreshVault(force = false) {
+    if (vaultLoading) return;
+    if (vaultLoaded && !force) return;
+    vaultLoading = true;
+    try {
+      vaultEntries = await vaultList();
+      vaultLoaded = true;
+    } catch (e) {
+      vaultError = `vault: ${e}`;
+    } finally {
+      vaultLoading = false;
+    }
+  }
+  $: if (activeSection === 'vault' && !vaultLoaded) refreshVault();
+
+  async function saveVaultDraft() {
+    vaultError = '';
+    const domain = vaultDraft.domain.trim();
+    const login = vaultDraft.login.trim();
+    const password = vaultDraft.password;
+    if (!domain || !login || !password) {
+      vaultError = 'Р—Р°РїРѕР»РЅРё domain, login Рё password.';
+      return;
+    }
+    try {
+      await vaultSet(domain, login, password);
+      vaultDraft = { domain: '', login: '', password: '' };
+      vaultLoaded = false;
+      await refreshVault(true);
+      vaultSavedFlash = 'вњ“ СЃРѕС…СЂР°РЅРµРЅРѕ';
+      if (vaultSaveTimer) clearTimeout(vaultSaveTimer);
+      vaultSaveTimer = setTimeout(() => (vaultSavedFlash = ''), 2000);
+    } catch (e) {
+      vaultError = `save: ${e}`;
+    }
+  }
+
+  async function deleteVault(domain: string) {
+    if (!confirm(`РЈРґР°Р»РёС‚СЊ credential РґР»СЏ "${domain}"?`)) return;
+    try {
+      await vaultDelete(domain);
+      vaultLoaded = false;
+      await refreshVault(true);
+    } catch (e) {
+      vaultError = `delete: ${e}`;
+    }
+  }
 
   async function saveKeyAction() {
     const trimmed = keyValue.trim();
-    if (!trimmed) { keyError = 'Введите ключ'; return; }
+    if (!trimmed) { keyError = 'Р’РІРµРґРёС‚Рµ РєР»СЋС‡'; return; }
     saving = true;
     keyError = '';
     try {
       await saveKey(trimmed);
       keyValue = '';
-      keySavedFlash = 'API-ключ сохранён';
+      keySavedFlash = 'API-РєР»СЋС‡ СЃРѕС…СЂР°РЅС‘РЅ';
       setTimeout(() => (keySavedFlash = ''), 2000);
     } catch (e) {
       keyError = String(e);
@@ -258,7 +332,7 @@
   }
 
   async function clearKeyAction() {
-    if (!confirm('Удалить сохранённый MiniMax-ключ из Credential Manager?')) return;
+    if (!confirm('РЈРґР°Р»РёС‚СЊ СЃРѕС…СЂР°РЅС‘РЅРЅС‹Р№ MiniMax-РєР»СЋС‡ РёР· Credential Manager?')) return;
     try {
       await clearKey();
     } catch { /* ignore */ }
@@ -271,10 +345,10 @@
   function saveInterests() {
     try {
       localStorage.setItem(INTERESTS_STORAGE_KEY, interestsText);
-      interestsSaved = 'Сохранено';
+      interestsSaved = 'РЎРѕС…СЂР°РЅРµРЅРѕ';
       setTimeout(() => (interestsSaved = ''), 2000);
     } catch {
-      interestsSaved = 'Ошибка';
+      interestsSaved = 'РћС€РёР±РєР°';
     }
   }
 
@@ -291,11 +365,11 @@
   <!-- Left sidebar (category nav) -->
   <aside class="sidebar">
     <div class="search-wrap">
-      <span class="search-icon">🔍</span>
+      <span class="search-icon">рџ”Ќ</span>
       <input
         class="search"
         type="text"
-        placeholder="Search settings…"
+        placeholder="Search settingsвЂ¦"
         bind:value={searchQuery}
       />
     </div>
@@ -315,7 +389,7 @@
         </button>
       {/each}
       {#if filteredSections.length === 0}
-        <div class="nav-empty">Ничего не найдено</div>
+        <div class="nav-empty">РќРёС‡РµРіРѕ РЅРµ РЅР°Р№РґРµРЅРѕ</div>
       {/if}
     </nav>
 
@@ -338,14 +412,14 @@
       {#if activeSection === 'api'}
         <section class="block">
           <div class="row-head">
-            <h3>🔑 MiniMax API Key</h3>
+            <h3>рџ”‘ MiniMax API Key</h3>
             <span class="badge" class:ok={hasMinimax} class:miss={!hasMinimax && !checking}>
-              {checking ? '…' : hasMinimax ? 'set' : 'missing'}
+              {checking ? 'вЂ¦' : hasMinimax ? 'set' : 'missing'}
             </span>
           </div>
           <p class="hint-text">
-            Ключ хранится в Windows Credential Manager через Rust keyring. В чат-трафик не уходит.
-            Получить: <a href="https://platform.minimaxi.com/" target="_blank" rel="noopener">platform.minimaxi.com → API Keys</a>.
+            РљР»СЋС‡ С…СЂР°РЅРёС‚СЃСЏ РІ Windows Credential Manager С‡РµСЂРµР· Rust keyring. Р’ С‡Р°С‚-С‚СЂР°С„РёРє РЅРµ СѓС…РѕРґРёС‚.
+            РџРѕР»СѓС‡РёС‚СЊ: <a href="https://platform.minimaxi.com/" target="_blank" rel="noopener">platform.minimaxi.com в†’ API Keys</a>.
           </p>
 
           <div class="row">
@@ -353,7 +427,7 @@
               <input
                 type="text"
                 bind:value={keyValue}
-                placeholder="sk-cp-… или eyJ…"
+                placeholder="sk-cp-вЂ¦ РёР»Рё eyJвЂ¦"
                 autocomplete="off"
                 spellcheck="false"
                 disabled={saving}
@@ -363,7 +437,7 @@
               <input
                 type="password"
                 bind:value={keyValue}
-                placeholder="sk-cp-… или eyJ…"
+                placeholder="sk-cp-вЂ¦ РёР»Рё eyJвЂ¦"
                 autocomplete="off"
                 spellcheck="false"
                 disabled={saving}
@@ -374,19 +448,19 @@
               class="toggle"
               type="button"
               on:click={() => (showKey = !showKey)}
-              aria-label={showKey ? 'Скрыть ключ' : 'Показать ключ'}
-              title={showKey ? 'Скрыть' : 'Показать'}
+              aria-label={showKey ? 'РЎРєСЂС‹С‚СЊ РєР»СЋС‡' : 'РџРѕРєР°Р·Р°С‚СЊ РєР»СЋС‡'}
+              title={showKey ? 'РЎРєСЂС‹С‚СЊ' : 'РџРѕРєР°Р·Р°С‚СЊ'}
               tabindex="-1"
-            >{showKey ? '🙈' : '👁'}</button>
+            >{showKey ? 'рџ™€' : 'рџ‘Ѓ'}</button>
           </div>
 
-          {#if keyError}<p class="err">⚠ {keyError}</p>{/if}
-          {#if keySavedFlash}<p class="ok-msg">✓ {keySavedFlash}</p>{/if}
+          {#if keyError}<p class="err">вљ  {keyError}</p>{/if}
+          {#if keySavedFlash}<p class="ok-msg">вњ“ {keySavedFlash}</p>{/if}
 
           <div class="actions">
-            <button class="ghost" type="button" on:click={clearKeyAction} disabled={!hasMinimax || saving}>Очистить</button>
+            <button class="ghost" type="button" on:click={clearKeyAction} disabled={!hasMinimax || saving}>РћС‡РёСЃС‚РёС‚СЊ</button>
             <button class="primary" type="button" on:click={saveKeyAction} disabled={saving || !keyValue.trim()}>
-              {saving ? 'Сохранение…' : 'Сохранить'}
+              {saving ? 'РЎРѕС…СЂР°РЅРµРЅРёРµвЂ¦' : 'РЎРѕС…СЂР°РЅРёС‚СЊ'}
             </button>
           </div>
         </section>
@@ -395,12 +469,12 @@
       {#if activeSection === 'theme'}
         <section class="block">
           <div class="row-head">
-            <h3>🎨 Тема оформления</h3>
+            <h3>рџЋЁ РўРµРјР° РѕС„РѕСЂРјР»РµРЅРёСЏ</h3>
             <span class="badge neutral">{theme === 'auto' ? 'auto' : theme}</span>
           </div>
           <p class="hint-text">
-            Светлая тема — по умолчанию. «Авто» следует за системной темой Windows.
-            Выбор сохраняется в localStorage и применяется до первой отрисовки.
+            РЎРІРµС‚Р»Р°СЏ С‚РµРјР° вЂ” РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ. В«РђРІС‚РѕВ» СЃР»РµРґСѓРµС‚ Р·Р° СЃРёСЃС‚РµРјРЅРѕР№ С‚РµРјРѕР№ Windows.
+            Р’С‹Р±РѕСЂ СЃРѕС…СЂР°РЅСЏРµС‚СЃСЏ РІ localStorage Рё РїСЂРёРјРµРЅСЏРµС‚СЃСЏ РґРѕ РїРµСЂРІРѕР№ РѕС‚СЂРёСЃРѕРІРєРё.
           </p>
           <div class="theme-grid">
             <button
@@ -422,8 +496,8 @@
                 </div>
               </div>
               <div class="theme-meta">
-                <span class="theme-name">☀ Светлая</span>
-                <span class="theme-sub">мягкий тёплый фон</span>
+                <span class="theme-name">вЂ РЎРІРµС‚Р»Р°СЏ</span>
+                <span class="theme-sub">РјСЏРіРєРёР№ С‚С‘РїР»С‹Р№ С„РѕРЅ</span>
               </div>
             </button>
             <button
@@ -445,8 +519,8 @@
                 </div>
               </div>
               <div class="theme-meta">
-                <span class="theme-name">🌙 Тёмная</span>
-                <span class="theme-sub">привычный ночной режим</span>
+                <span class="theme-name">рџЊ™ РўС‘РјРЅР°СЏ</span>
+                <span class="theme-sub">РїСЂРёРІС‹С‡РЅС‹Р№ РЅРѕС‡РЅРѕР№ СЂРµР¶РёРј</span>
               </div>
             </button>
             <button
@@ -468,8 +542,8 @@
                 </div>
               </div>
               <div class="theme-meta">
-                <span class="theme-name">🖥 Авто</span>
-                <span class="theme-sub">как в Windows</span>
+                <span class="theme-name">рџ–Ґ РђРІС‚Рѕ</span>
+                <span class="theme-sub">РєР°Рє РІ Windows</span>
               </div>
             </button>
           </div>
@@ -479,11 +553,11 @@
       {#if activeSection === 'model'}
         <section class="block">
           <div class="row-head">
-            <h3>🧠 Модель по умолчанию</h3>
+            <h3>рџ§  РњРѕРґРµР»СЊ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ</h3>
             <span class="badge neutral">{currentModel.label}</span>
           </div>
           <p class="hint-text">
-            Применяется к чату. В окне чата модель можно переключить через dropdown в шапке.
+            РџСЂРёРјРµРЅСЏРµС‚СЃСЏ Рє С‡Р°С‚Сѓ. Р’ РѕРєРЅРµ С‡Р°С‚Р° РјРѕРґРµР»СЊ РјРѕР¶РЅРѕ РїРµСЂРµРєР»СЋС‡РёС‚СЊ С‡РµСЂРµР· dropdown РІ С€Р°РїРєРµ.
           </p>
           <div class="model-list">
             {#each MODELS as m (m.id)}
@@ -498,7 +572,7 @@
                 <span class="model-check"></span>
                 <span class="model-info">
                   <span class="model-label">{m.label}</span>
-                  <span class="model-meta">API: {m.model || 'по умолчанию провайдера'}</span>
+                  <span class="model-meta">API: {m.model || 'РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ РїСЂРѕРІР°Р№РґРµСЂР°'}</span>
                 </span>
               </label>
             {/each}
@@ -509,12 +583,12 @@
       {#if activeSection === 'interests'}
         <section class="block">
           <div class="row-head">
-            <h3>📰 Интересы для News-агента</h3>
-            <span class="badge neutral">{interestsList.length} тем</span>
+            <h3>рџ“° РРЅС‚РµСЂРµСЃС‹ РґР»СЏ News-Р°РіРµРЅС‚Р°</h3>
+            <span class="badge neutral">{interestsList.length} С‚РµРј</span>
           </div>
           <p class="hint-text">
-            News-режим использует эти темы для автоподбора материалов через DuckDuckGo.
-            Через запятую или с новой строки. Примеры: <code>AI, Rust, Tauri, anime, космос</code>.
+            News-СЂРµР¶РёРј РёСЃРїРѕР»СЊР·СѓРµС‚ СЌС‚Рё С‚РµРјС‹ РґР»СЏ Р°РІС‚РѕРїРѕРґР±РѕСЂР° РјР°С‚РµСЂРёР°Р»РѕРІ С‡РµСЂРµР· DuckDuckGo.
+            Р§РµСЂРµР· Р·Р°РїСЏС‚СѓСЋ РёР»Рё СЃ РЅРѕРІРѕР№ СЃС‚СЂРѕРєРё. РџСЂРёРјРµСЂС‹: <code>AI, Rust, Tauri, anime, РєРѕСЃРјРѕСЃ</code>.
           </p>
           <textarea
             class="interests-area"
@@ -528,12 +602,12 @@
               <span class="chip">{tag}</span>
             {/each}
             {#if interestsList.length === 0}
-              <span class="chip empty">⚠ пусто</span>
+              <span class="chip empty">вљ  РїСѓСЃС‚Рѕ</span>
             {/if}
           </div>
-          {#if interestsSaved}<p class="ok-msg">✓ {interestsSaved}</p>{/if}
+          {#if interestsSaved}<p class="ok-msg">вњ“ {interestsSaved}</p>{/if}
           <div class="actions">
-            <button class="primary" type="button" on:click={saveInterests}>Сохранить интересы</button>
+            <button class="primary" type="button" on:click={saveInterests}>РЎРѕС…СЂР°РЅРёС‚СЊ РёРЅС‚РµСЂРµСЃС‹</button>
           </div>
         </section>
       {/if}
@@ -541,32 +615,32 @@
       {#if activeSection === 'voice'}
         <section class="block">
           <div class="row-head">
-            <h3>🎙 Голосовой ввод (Whisper)</h3>
-            <span class="badge neutral">локальный fallback</span>
+            <h3>рџЋ™ Р“РѕР»РѕСЃРѕРІРѕР№ РІРІРѕРґ (Whisper)</h3>
+            <span class="badge neutral">Р»РѕРєР°Р»СЊРЅС‹Р№ fallback</span>
           </div>
           <p class="hint-text">
-            Whisper-модели управляются прямо в чате — нажми 🎙 в композере, и если модели нет,
-            появится предложение скачать. Глобальный хоткей: <kbd>Ctrl</kbd>+<kbd>Space</kbd>.
+            Whisper-РјРѕРґРµР»Рё СѓРїСЂР°РІР»СЏСЋС‚СЃСЏ РїСЂСЏРјРѕ РІ С‡Р°С‚Рµ вЂ” РЅР°Р¶РјРё рџЋ™ РІ РєРѕРјРїРѕР·РµСЂРµ, Рё РµСЃР»Рё РјРѕРґРµР»Рё РЅРµС‚,
+            РїРѕСЏРІРёС‚СЃСЏ РїСЂРµРґР»РѕР¶РµРЅРёРµ СЃРєР°С‡Р°С‚СЊ. Р“Р»РѕР±Р°Р»СЊРЅС‹Р№ С…РѕС‚РєРµР№: <kbd>Ctrl</kbd>+<kbd>Space</kbd>.
           </p>
           <ul class="info-list">
-            <li><b>Старт/стоп записи</b>: 🎙 в композере чата или <kbd>Ctrl</kbd>+<kbd>Space</kbd> глобально</li>
-            <li><b>Модели</b>: <code>base</code> ≈ 140 МБ, <code>small</code> ≈ 460 МБ — рекомендую <code>base</code></li>
-            <li><b>Где хранятся</b>: <code>%APPDATA%\com.luna.agent\whisper-models\</code></li>
-            <li><b>Текущая ошибка</b> (если была): <code>stt:allow-list-models</code> — уже добавлено в capabilities</li>
+            <li><b>РЎС‚Р°СЂС‚/СЃС‚РѕРї Р·Р°РїРёСЃРё</b>: рџЋ™ РІ РєРѕРјРїРѕР·РµСЂРµ С‡Р°С‚Р° РёР»Рё <kbd>Ctrl</kbd>+<kbd>Space</kbd> РіР»РѕР±Р°Р»СЊРЅРѕ</li>
+            <li><b>РњРѕРґРµР»Рё</b>: <code>base</code> в‰€ 140 РњР‘, <code>small</code> в‰€ 460 РњР‘ вЂ” СЂРµРєРѕРјРµРЅРґСѓСЋ <code>base</code></li>
+            <li><b>Р“РґРµ С…СЂР°РЅСЏС‚СЃСЏ</b>: <code>%APPDATA%\com.luna.agent\whisper-models\</code></li>
+            <li><b>РўРµРєСѓС‰Р°СЏ РѕС€РёР±РєР°</b> (РµСЃР»Рё Р±С‹Р»Р°): <code>stt:allow-list-models</code> вЂ” СѓР¶Рµ РґРѕР±Р°РІР»РµРЅРѕ РІ capabilities</li>
           </ul>
         </section>
 
         <section class="block">
           <div class="row-head">
-            <h3>🔮 Daimonion — голосовой ассистент</h3>
-            <span class="badge ok">D0+ готов</span>
+            <h3>рџ”® Daimonion вЂ” РіРѕР»РѕСЃРѕРІРѕР№ Р°СЃСЃРёСЃС‚РµРЅС‚</h3>
+            <span class="badge ok">D0+ РіРѕС‚РѕРІ</span>
           </div>
           <p class="hint-text">
-            Daimonion (Δαιμόνιον) — голос-первый мультимодальный ассистент
-            из тёмной линейки Luna (рядом с Lucifer / Azazel / Raziel /
-            Mephistopheles). STT и TTS идут через <b>MiniMax</b> (нужна
-            активная подписка Ultra и MiniMax-ключ в API Keys).
-            Push-to-talk в панели Daimonion — <kbd>Space</kbd>.
+            Daimonion (О”О±О№ОјПЊОЅО№ОїОЅ) вЂ” РіРѕР»РѕСЃ-РїРµСЂРІС‹Р№ РјСѓР»СЊС‚РёРјРѕРґР°Р»СЊРЅС‹Р№ Р°СЃСЃРёСЃС‚РµРЅС‚
+            РёР· С‚С‘РјРЅРѕР№ Р»РёРЅРµР№РєРё Luna (СЂСЏРґРѕРј СЃ Lucifer / Azazel / Raziel /
+            Mephistopheles). STT Рё TTS РёРґСѓС‚ С‡РµСЂРµР· <b>MiniMax</b> (РЅСѓР¶РЅР°
+            Р°РєС‚РёРІРЅР°СЏ РїРѕРґРїРёСЃРєР° Ultra Рё MiniMax-РєР»СЋС‡ РІ API Keys).
+            Push-to-talk РІ РїР°РЅРµР»Рё Daimonion вЂ” <kbd>Space</kbd>.
           </p>
 
           <div class="vad-grid">
@@ -574,33 +648,33 @@
               <span>Energy threshold</span>
               <input type="number" min="0.001" max="0.5" step="0.001"
                 bind:value={vad.energy_threshold} />
-              <small>0.001–0.5. Ниже = чувствительнее.</small>
+              <small>0.001вЂ“0.5. РќРёР¶Рµ = С‡СѓРІСЃС‚РІРёС‚РµР»СЊРЅРµРµ.</small>
             </label>
             <label>
               <span>Start hold (frames)</span>
               <input type="number" min="1" max="50" step="1"
                 bind:value={vad.start_hold_frames} />
-              <small>Сколько фреймов подряд выше порога до старта речи.</small>
+              <small>РЎРєРѕР»СЊРєРѕ С„СЂРµР№РјРѕРІ РїРѕРґСЂСЏРґ РІС‹С€Рµ РїРѕСЂРѕРіР° РґРѕ СЃС‚Р°СЂС‚Р° СЂРµС‡Рё.</small>
             </label>
             <label>
               <span>End hold (frames)</span>
               <input type="number" min="10" max="500" step="1"
                 bind:value={vad.end_hold_frames} />
-              <small>Тишина (мс = frames × 10) до конца фразы.</small>
+              <small>РўРёС€РёРЅР° (РјСЃ = frames Г— 10) РґРѕ РєРѕРЅС†Р° С„СЂР°Р·С‹.</small>
             </label>
             <label>
               <span>Frame (ms)</span>
               <input type="number" min="5" max="50" step="1"
                 bind:value={vad.frame_ms} />
-              <small>Размер фрейма для VAD-математики.</small>
+              <small>Р Р°Р·РјРµСЂ С„СЂРµР№РјР° РґР»СЏ VAD-РјР°С‚РµРјР°С‚РёРєРё.</small>
             </label>
           </div>
 
           <ul class="info-list">
-            <li><b>Pipeline</b>: cpal mic → VAD → MiniMax ASR → MiniMax-M3 → MiniMax T2A (speech-02) → cpal</li>
-            <li><b>Latency budget</b>: ≤ 1.5 с p50, ≤ 2.5 с p95 end-to-end</li>
-            <li><b>Vision</b>: модель сама решает, когда смотреть экран (D2+); не always-on</li>
-            <li><b>Read-only</b>: Daimonion смотрит и говорит, не правит файлы</li>
+            <li><b>Pipeline</b>: cpal mic в†’ VAD в†’ MiniMax ASR в†’ MiniMax-M3 в†’ MiniMax T2A (speech-02) в†’ cpal</li>
+            <li><b>Latency budget</b>: в‰¤ 1.5 СЃ p50, в‰¤ 2.5 СЃ p95 end-to-end</li>
+            <li><b>Vision</b>: РјРѕРґРµР»СЊ СЃР°РјР° СЂРµС€Р°РµС‚, РєРѕРіРґР° СЃРјРѕС‚СЂРµС‚СЊ СЌРєСЂР°РЅ (D2+); РЅРµ always-on</li>
+            <li><b>Read-only</b>: Daimonion СЃРјРѕС‚СЂРёС‚ Рё РіРѕРІРѕСЂРёС‚, РЅРµ РїСЂР°РІРёС‚ С„Р°Р№Р»С‹</li>
           </ul>
         </section>
       {/if}
@@ -611,15 +685,123 @@
         </section>
       {/if}
 
+      {#if activeSection === 'vault'}
+        <section class="block">
+          <div class="row-head">
+            <h3>рџ”ђ Azazel Vault</h3>
+            <span class="badge neutral">
+              {vaultEntries.length} {vaultEntries.length === 1 ? 'Р·Р°РїРёСЃСЊ' : 'Р·Р°РїРёСЃРµР№'}
+            </span>
+          </div>
+          <p class="hint-text">
+            Р›РѕРіРёРЅС‹ Рё РїР°СЂРѕР»Рё РґР»СЏ СЃР°Р№С‚РѕРІ, РЅР° РєРѕС‚РѕСЂС‹Рµ Azazel РґРѕР»Р¶РµРЅ СѓРјРµС‚СЊ Р»РѕРіРёРЅРёС‚СЊСЃСЏ
+            (VK, GitHub, Gmail, etc). РҐСЂР°РЅСЏС‚СЃСЏ РІ OS keyring вЂ” <strong>РјРѕРґРµР»СЊ РёС… РЅРёРєРѕРіРґР° РЅРµ
+            РІРёРґРёС‚</strong>. РљРѕРіРґР° РјРѕРґРµР»СЊ РІС‹Р·С‹РІР°РµС‚ <code>azazel_run</code> СЃ
+            <code>vault_domain="vk.com"</code>, РїР°СЂРѕР»СЊ РїРѕРґСЃС‚Р°РІР»СЏРµС‚СЃСЏ РІ Р±СЂР°СѓР·РµСЂРЅСѓСЋ СЃРµСЃСЃРёСЋ
+            СЃРµСЂРІРµСЂРѕРј Azazel.
+          </p>
+
+          {#if vaultError}
+            <div class="banner banner-error">вљ  {vaultError}</div>
+          {/if}
+          {#if vaultSavedFlash}
+            <div class="banner banner-ok">{vaultSavedFlash}</div>
+          {/if}
+
+          <div class="vault-add">
+            <h4>+ Р”РѕР±Р°РІРёС‚СЊ credential</h4>
+            <div class="vault-row">
+              <label>
+                Domain
+                <input
+                  type="text"
+                  placeholder="vk.com"
+                  bind:value={vaultDraft.domain}
+                />
+              </label>
+              <label>
+                Login
+                <input
+                  type="text"
+                  placeholder="username / email / phone"
+                  bind:value={vaultDraft.login}
+                />
+              </label>
+              <label>
+                Password
+                <input
+                  type="password"
+                  placeholder="вЂўвЂўвЂўвЂўвЂўвЂўвЂўвЂў"
+                  bind:value={vaultDraft.password}
+                />
+              </label>
+              <button class="btn-primary" type="button" on:click={saveVaultDraft}>
+                РЎРѕС…СЂР°РЅРёС‚СЊ
+              </button>
+            </div>
+            <p class="hint-text subtle">
+              Р”РѕРјРµРЅ РЅРѕСЂРјР°Р»РёР·СѓРµС‚СЃСЏ: <code>https://www.VK.com/login</code> в†’ <code>vk.com</code>.
+              Р§СѓРІСЃС‚РІРёС‚РµР»СЊРЅС‹Рµ РґР°РЅРЅС‹Рµ С€РёС„СЂСѓСЋС‚СЃСЏ OS keyring.
+            </p>
+          </div>
+
+          <h4>РЎРѕС…СЂР°РЅС‘РЅРЅС‹Рµ credentials</h4>
+          {#if vaultLoading}
+            <p class="hint-text">Р—Р°РіСЂСѓР·РєР°вЂ¦</p>
+          {:else if vaultEntries.length === 0}
+            <p class="hint-text subtle">
+              РџРѕРєР° РїСѓСЃС‚Рѕ. Р”РѕР±Р°РІСЊ РїРµСЂРІСѓСЋ Р·Р°РїРёСЃСЊ РІС‹С€Рµ вЂ” Azazel СЃРјРѕР¶РµС‚ Р»РѕРіРёРЅРёС‚СЊСЃСЏ
+              Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё.
+            </p>
+          {:else}
+            <table class="vault-table">
+              <thead>
+                <tr>
+                  <th>Domain</th>
+                  <th>Login</th>
+                  <th>Password</th>
+                  <th>Updated</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each vaultEntries as e (e.domain)}
+                  <tr>
+                    <td><code>{e.domain}</code></td>
+                    <td>{e.login}</td>
+                    <td>
+                      {#if e.has_password}
+                        <span class="muted">вЂўвЂўвЂўвЂўвЂўвЂўвЂўвЂў (РІ keyring)</span>
+                      {:else}
+                        <span class="muted">вЂ”</span>
+                      {/if}
+                    </td>
+                    <td class="muted">{e.updated_at}</td>
+                    <td>
+                      <button
+                        class="btn-icon"
+                        type="button"
+                        title="РЈРґР°Р»РёС‚СЊ"
+                        on:click={() => deleteVault(e.domain)}
+                      >рџ—‘</button>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          {/if}
+        </section>
+      {/if}
+
       {#if activeSection === 'shell'}
         <section class="block">
           <div class="row-head">
-            <h3>🖥 Shell-команды</h3>
-            <span class="badge neutral">{shellList?.commands.length ?? 0} команд</span>
+            <h3>рџ–Ґ Shell-РєРѕРјР°РЅРґС‹</h3>
+            <span class="badge neutral">{shellList?.commands.length ?? 0} РєРѕРјР°РЅРґ</span>
           </div>
           <p class="hint-text">
-            Только перечисленные команды могут вызываться из агента / чата. Поведение: argv-only, без <code>sh -c</code> / <code>cmd /c "&lt;string&gt;"</code> — никакой shell-инъекции.
-            Файл allow-list: <code>%LOCALAPPDATA%\luna-agent\shell-allowlist.json</code>.
+            РўРѕР»СЊРєРѕ РїРµСЂРµС‡РёСЃР»РµРЅРЅС‹Рµ РєРѕРјР°РЅРґС‹ РјРѕРіСѓС‚ РІС‹Р·С‹РІР°С‚СЊСЃСЏ РёР· Р°РіРµРЅС‚Р° / С‡Р°С‚Р°. РџРѕРІРµРґРµРЅРёРµ: argv-only, Р±РµР· <code>sh -c</code> / <code>cmd /c "&lt;string&gt;"</code> вЂ” РЅРёРєР°РєРѕР№ shell-РёРЅСЉРµРєС†РёРё.
+            Р¤Р°Р№Р» allow-list: <code>%LOCALAPPDATA%\luna-agent\shell-allowlist.json</code>.
           </p>
 
           <div class="shell-list">
@@ -628,7 +810,7 @@
                 <div class="shell-name">{e.name}</div>
                 <div class="shell-subs">
                   {#if (e.subcommand_patterns ?? []).length === 0}
-                    <span class="shell-empty-tag">любые subcommand</span>
+                    <span class="shell-empty-tag">Р»СЋР±С‹Рµ subcommand</span>
                   {:else}
                     {#each e.subcommand_patterns as p (p)}
                       <span class="shell-sub">{p}</span>
@@ -639,8 +821,8 @@
                   type="button"
                   class="shell-del"
                   on:click={() => removeCmd(e.name)}
-                  title="Удалить из allow-list"
-                >✕</button>
+                  title="РЈРґР°Р»РёС‚СЊ РёР· allow-list"
+                >вњ•</button>
               </div>
             {/each}
           </div>
@@ -649,23 +831,23 @@
             <input
               type="text"
               class="shell-input"
-              placeholder="имя (powershell, bash, cmd, …)"
+              placeholder="РёРјСЏ (powershell, bash, cmd, вЂ¦)"
               bind:value={newCmdName}
               on:keydown={(e) => { if (e.key === 'Enter') addCmd(); }}
             />
             <input
               type="text"
               class="shell-input shell-subs-input"
-              placeholder="subcommand (через запятую, опционально)"
+              placeholder="subcommand (С‡РµСЂРµР· Р·Р°РїСЏС‚СѓСЋ, РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)"
               bind:value={newCmdSubs}
               on:keydown={(e) => { if (e.key === 'Enter') addCmd(); }}
             />
-            <button type="button" class="primary" on:click={addCmd} disabled={!newCmdName.trim()}>+ Добавить</button>
-            <button type="button" class="secondary" on:click={resetShellList}>↺ Дефолты</button>
+            <button type="button" class="primary" on:click={addCmd} disabled={!newCmdName.trim()}>+ Р”РѕР±Р°РІРёС‚СЊ</button>
+            <button type="button" class="secondary" on:click={resetShellList}>в†є Р”РµС„РѕР»С‚С‹</button>
           </div>
           <p class="shell-hint">
-            Примеры: <code>bash</code>, <code>cmd</code>, <code>powershell</code>, <code>cargo</code>, <code>pytest</code>, <code>node</code>.
-            Если в поле <em>subcommand</em> указать <code>test, build, run</code> — допустимы только эти subcommand-ы (для команд с явной подкомандной структурой). Пусто = любые.
+            РџСЂРёРјРµСЂС‹: <code>bash</code>, <code>cmd</code>, <code>powershell</code>, <code>cargo</code>, <code>pytest</code>, <code>node</code>.
+            Р•СЃР»Рё РІ РїРѕР»Рµ <em>subcommand</em> СѓРєР°Р·Р°С‚СЊ <code>test, build, run</code> вЂ” РґРѕРїСѓСЃС‚РёРјС‹ С‚РѕР»СЊРєРѕ СЌС‚Рё subcommand-С‹ (РґР»СЏ РєРѕРјР°РЅРґ СЃ СЏРІРЅРѕР№ РїРѕРґРєРѕРјР°РЅРґРЅРѕР№ СЃС‚СЂСѓРєС‚СѓСЂРѕР№). РџСѓСЃС‚Рѕ = Р»СЋР±С‹Рµ.
           </p>
         </section>
       {/if}
@@ -673,49 +855,49 @@
       {#if activeSection === 'self_evolution'}
         <section class="block">
           <div class="row-head">
-            <h3>🧬 Self-evolution (E0–E4)</h3>
-            <span class="badge neutral">экспериментально</span>
+            <h3>рџ§¬ Self-evolution (E0вЂ“E4)</h3>
+            <span class="badge neutral">СЌРєСЃРїРµСЂРёРјРµРЅС‚Р°Р»СЊРЅРѕ</span>
           </div>
           <p class="hint-text">
-            Luna может читать собственные исходники, находить в них проблемы,
-            составлять план правок, проверять его в песочнице (sandbox) и
-            атомарно обновлять свой бинарь. <b>Только ручной запуск</b>:
-            вы нажимаете кнопку, видите отчёт и подтверждаете apply.
+            Luna РјРѕР¶РµС‚ С‡РёС‚Р°С‚СЊ СЃРѕР±СЃС‚РІРµРЅРЅС‹Рµ РёСЃС…РѕРґРЅРёРєРё, РЅР°С…РѕРґРёС‚СЊ РІ РЅРёС… РїСЂРѕР±Р»РµРјС‹,
+            СЃРѕСЃС‚Р°РІР»СЏС‚СЊ РїР»Р°РЅ РїСЂР°РІРѕРє, РїСЂРѕРІРµСЂСЏС‚СЊ РµРіРѕ РІ РїРµСЃРѕС‡РЅРёС†Рµ (sandbox) Рё
+            Р°С‚РѕРјР°СЂРЅРѕ РѕР±РЅРѕРІР»СЏС‚СЊ СЃРІРѕР№ Р±РёРЅР°СЂСЊ. <b>РўРѕР»СЊРєРѕ СЂСѓС‡РЅРѕР№ Р·Р°РїСѓСЃРє</b>:
+            РІС‹ РЅР°Р¶РёРјР°РµС‚Рµ РєРЅРѕРїРєСѓ, РІРёРґРёС‚Рµ РѕС‚С‡С‘С‚ Рё РїРѕРґС‚РІРµСЂР¶РґР°РµС‚Рµ apply.
           </p>
           <ul class="info-list">
-            <li><b>Все этапы включены в текущей сборке</b> (E0 inspect · E1 snapshots · E2 diagnose · E3 sandbox · E4 apply/rollback)</li>
-            <li><b>Где лежат данные</b>: <code>%LOCALAPPDATA%\com.luna.agent\evolver\</code>
+            <li><b>Р’СЃРµ СЌС‚Р°РїС‹ РІРєР»СЋС‡РµРЅС‹ РІ С‚РµРєСѓС‰РµР№ СЃР±РѕСЂРєРµ</b> (E0 inspect В· E1 snapshots В· E2 diagnose В· E3 sandbox В· E4 apply/rollback)</li>
+            <li><b>Р“РґРµ Р»РµР¶Р°С‚ РґР°РЅРЅС‹Рµ</b>: <code>%LOCALAPPDATA%\com.luna.agent\evolver\</code>
               <ul>
-                <li><code>active.json</code> — текущая версия</li>
-                <li><code>snapshots/&lt;id&gt;/src/</code> — полные копии исходников</li>
-                <li><code>feedback/&lt;id&gt;.json</code> — ваш фидбек (используется в следующей diagnose)</li>
-                <li><code>plans/&lt;id&gt;.json</code> — последние планы</li>
+                <li><code>active.json</code> вЂ” С‚РµРєСѓС‰Р°СЏ РІРµСЂСЃРёСЏ</li>
+                <li><code>snapshots/&lt;id&gt;/src/</code> вЂ” РїРѕР»РЅС‹Рµ РєРѕРїРёРё РёСЃС…РѕРґРЅРёРєРѕРІ</li>
+                <li><code>feedback/&lt;id&gt;.json</code> вЂ” РІР°С€ С„РёРґР±РµРє (РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РІ СЃР»РµРґСѓСЋС‰РµР№ diagnose)</li>
+                <li><code>plans/&lt;id&gt;.json</code> вЂ” РїРѕСЃР»РµРґРЅРёРµ РїР»Р°РЅС‹</li>
               </ul>
             </li>
-            <li><b>Окружение</b>: <code>LUNA_SOURCE_ROOT</code> env var или автодетект от бинаря</li>
-            <li><b>Защищённые файлы</b> (worker откажется их трогать): <code>Cargo.toml</code>, <code>tauri.conf.json</code>, <code>package.json</code>, <code>capabilities/default.json</code>, <code>vendor/</code>, <code>LICENSE*</code></li>
-            <li><b>Требования</b>: Rust toolchain (cargo), <code>tauri-build.cmd</code> в PATH (Windows)</li>
-            <li><b>GC</b>: 5 последних non-important + все important + active</li>
-            <li><b>Открыть вкладку</b>: <code>🧬 Self</code> в шапке главного окна</li>
+            <li><b>РћРєСЂСѓР¶РµРЅРёРµ</b>: <code>LUNA_SOURCE_ROOT</code> env var РёР»Рё Р°РІС‚РѕРґРµС‚РµРєС‚ РѕС‚ Р±РёРЅР°СЂСЏ</li>
+            <li><b>Р—Р°С‰РёС‰С‘РЅРЅС‹Рµ С„Р°Р№Р»С‹</b> (worker РѕС‚РєР°Р¶РµС‚СЃСЏ РёС… С‚СЂРѕРіР°С‚СЊ): <code>Cargo.toml</code>, <code>tauri.conf.json</code>, <code>package.json</code>, <code>capabilities/default.json</code>, <code>vendor/</code>, <code>LICENSE*</code></li>
+            <li><b>РўСЂРµР±РѕРІР°РЅРёСЏ</b>: Rust toolchain (cargo), <code>tauri-build.cmd</code> РІ PATH (Windows)</li>
+            <li><b>GC</b>: 5 РїРѕСЃР»РµРґРЅРёС… non-important + РІСЃРµ important + active</li>
+            <li><b>РћС‚РєСЂС‹С‚СЊ РІРєР»Р°РґРєСѓ</b>: <code>рџ§¬ Self</code> РІ С€Р°РїРєРµ РіР»Р°РІРЅРѕРіРѕ РѕРєРЅР°</li>
           </ul>
           <p class="hint-text">
-            <b>Внимание:</b> apply/rollback пересобирает бинарь и атомарно
-            подменяет его. <b>Всегда делается pre-update snapshot</b>, к
-            которому можно откатиться. В Windows после успешного apply
-            нужно вручную перезапустить Luna, чтобы загрузить новый .exe.
+            <b>Р’РЅРёРјР°РЅРёРµ:</b> apply/rollback РїРµСЂРµСЃРѕР±РёСЂР°РµС‚ Р±РёРЅР°СЂСЊ Рё Р°С‚РѕРјР°СЂРЅРѕ
+            РїРѕРґРјРµРЅСЏРµС‚ РµРіРѕ. <b>Р’СЃРµРіРґР° РґРµР»Р°РµС‚СЃСЏ pre-update snapshot</b>, Рє
+            РєРѕС‚РѕСЂРѕРјСѓ РјРѕР¶РЅРѕ РѕС‚РєР°С‚РёС‚СЊСЃСЏ. Р’ Windows РїРѕСЃР»Рµ СѓСЃРїРµС€РЅРѕРіРѕ apply
+            РЅСѓР¶РЅРѕ РІСЂСѓС‡РЅСѓСЋ РїРµСЂРµР·Р°РїСѓСЃС‚РёС‚СЊ Luna, С‡С‚РѕР±С‹ Р·Р°РіСЂСѓР·РёС‚СЊ РЅРѕРІС‹Р№ .exe.
           </p>
         </section>
       {/if}
 
       {#if activeSection === 'about'}
         <section class="block">
-          <h3>ℹ About Luna Agent</h3>
-          <p class="hint-text">Tauri 2 + Svelte десктоп-агент. Стриминг, DuckDuckGo, локальный keyring, голос через Whisper.</p>
+          <h3>в„№ About Luna Agent</h3>
+          <p class="hint-text">Tauri 2 + Svelte РґРµСЃРєС‚РѕРї-Р°РіРµРЅС‚. РЎС‚СЂРёРјРёРЅРі, DuckDuckGo, Р»РѕРєР°Р»СЊРЅС‹Р№ keyring, РіРѕР»РѕСЃ С‡РµСЂРµР· Whisper.</p>
           <ul class="info-list">
-            <li><b>Голосовой ввод</b>: 🎙 в композере или <kbd>Ctrl</kbd>+<kbd>Space</kbd></li>
-            <li><b>News-агент</b>: 📰 в шапке чата → автоподбор по интересам</li>
-            <li><b>Кликабельные ссылки</b> в ответах → системный браузер</li>
-            <li><b>Стриминг</b> пока не подключён — MiniMax возвращает полный ответ</li>
+            <li><b>Р“РѕР»РѕСЃРѕРІРѕР№ РІРІРѕРґ</b>: рџЋ™ РІ РєРѕРјРїРѕР·РµСЂРµ РёР»Рё <kbd>Ctrl</kbd>+<kbd>Space</kbd></li>
+            <li><b>News-Р°РіРµРЅС‚</b>: рџ“° РІ С€Р°РїРєРµ С‡Р°С‚Р° в†’ Р°РІС‚РѕРїРѕРґР±РѕСЂ РїРѕ РёРЅС‚РµСЂРµСЃР°Рј</li>
+            <li><b>РљР»РёРєР°Р±РµР»СЊРЅС‹Рµ СЃСЃС‹Р»РєРё</b> РІ РѕС‚РІРµС‚Р°С… в†’ СЃРёСЃС‚РµРјРЅС‹Р№ Р±СЂР°СѓР·РµСЂ</li>
+            <li><b>РЎС‚СЂРёРјРёРЅРі</b> РїРѕРєР° РЅРµ РїРѕРґРєР»СЋС‡С‘РЅ вЂ” MiniMax РІРѕР·РІСЂР°С‰Р°РµС‚ РїРѕР»РЅС‹Р№ РѕС‚РІРµС‚</li>
           </ul>
           <div class="meta-grid">
             <div class="meta-row"><span class="meta-k">Frontend</span><span class="meta-v">Svelte 4 + Vite</span></div>
@@ -1123,4 +1305,100 @@
   .meta-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 11px; }
   .meta-k { color: var(--text-muted); min-width: 80px; }
   .meta-v { color: var(--text); font-family: ui-monospace, monospace; font-size: 10px; }
+
+  /* ---- Vault section ---- */
+  .vault-add {
+    border: 1px solid var(--border, #2a2a2e);
+    border-radius: 8px;
+    padding: 12px;
+    margin: 12px 0 18px 0;
+    background: var(--bg-elevated, #1c1c20);
+  }
+  .vault-add h4 {
+    margin: 0 0 8px 0;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .vault-row {
+    display: grid;
+    grid-template-columns: 1.2fr 1.5fr 1.5fr auto;
+    gap: 8px;
+    align-items: end;
+  }
+  .vault-row label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-muted, #9aa0a6);
+  }
+  .vault-row input {
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border, #2a2a2e);
+    background: var(--bg, #0f1217);
+    color: var(--text, #e6e8eb);
+    font-size: 12px;
+    font-family: inherit;
+  }
+  .vault-row input:focus {
+    outline: 1px solid var(--accent, #8a7cff);
+  }
+  .vault-row .btn-primary {
+    padding: 6px 14px;
+    background: var(--accent, #8a7cff);
+    color: white;
+    border: 0;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .vault-row .btn-primary:hover { opacity: 0.9; }
+  .vault-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .vault-table th,
+  .vault-table td {
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border, #2a2a2e);
+  }
+  .vault-table th {
+    color: var(--text-muted, #9aa0a6);
+    font-weight: 600;
+    font-size: 11px;
+  }
+  .vault-table .muted {
+    color: var(--text-muted, #9aa0a6);
+    font-size: 11px;
+  }
+  .vault-table .btn-icon {
+    background: transparent;
+    border: 0;
+    color: var(--text-muted, #9aa0a6);
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .vault-table .btn-icon:hover { color: var(--warn, #ff6b6b); }
+  .hint-text.subtle { opacity: 0.7; font-size: 11px; }
+  .banner {
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin: 8px 0;
+    font-size: 12px;
+  }
+  .banner-error {
+    background: var(--warn-soft, rgba(255, 107, 107, 0.12));
+    color: var(--warn, #ff6b6b);
+    border: 1px solid var(--warn, #ff6b6b);
+  }
+  .banner-ok {
+    background: var(--ok-soft, rgba(120, 200, 120, 0.12));
+    color: var(--ok, #78c878);
+    border: 1px solid var(--ok, #78c878);
+  }
 </style>
