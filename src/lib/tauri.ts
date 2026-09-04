@@ -546,6 +546,84 @@ export async function setUserInterests(interests: string[]): Promise<void> {
   await invoke('set_user_interests', { interests });
 }
 
+// ---------- Persona (Phase P / UX-1) ----------
+
+/**
+ * Hot-reload the persona registry from disk. Returns the per-file
+ * errors so the UI can show "1 persona failed to load" badges.
+ */
+export async function personaReload(): Promise<Array<[string, string]>> {
+  return invoke<Array<[string, string]>>('persona_reload');
+}
+
+/** List loaded personas (id, display_name, role, default_model, allowed_tools). */
+export async function personaList(): Promise<PersonaSummaryDto[]> {
+  return invoke<PersonaSummaryDto[]>('persona_list');
+}
+
+/** Get a single persona by id (the full TOML-backed struct). */
+export async function personaGet(id: string): Promise<AgentPersonaDto> {
+  return invoke<AgentPersonaDto>('persona_get', { id });
+}
+
+/**
+ * Phase UX-1. Fire a slash-command persona trigger. Called from
+ * Chat when the user types `/memory ...` or `/daimonion ...` (or
+ * any other registered slash). Returns the resolved `persona_id`
+ * on success; the server emits a `persona:slash-fired` event the
+ * supervisor can listen for. Throws on unknown command or unloaded
+ * persona — chat input shows the error inline.
+ */
+export async function personaFireSlash(
+  command: string,
+  args: string,
+): Promise<string> {
+  return invoke<string>('persona_fire_slash', { command, args });
+}
+
+/** Subscribe to `persona:slash-fired` events. Returns the unsub fn. */
+export async function onPersonaSlashFired(
+  cb: (trigger: PersonaSlashTrigger) => void,
+): Promise<() => void> {
+  return listen<PersonaSlashTrigger>('persona:slash-fired', (e) => cb(e.payload));
+}
+
+// ---- persona DTOs (mirror the Rust types) ----
+
+export interface PersonaSummaryDto {
+  id: string;
+  display_name: string;
+  display_name_alt?: string | null;
+  role: string;
+  default_model: string;
+  allowed_tools: string[];
+}
+
+export interface AgentPersonaDto extends PersonaSummaryDto {
+  system_prompt_path: string;
+  model_per_mode?: Record<string, string>;
+  sub_agent_model: string;
+  max_steps: number;
+  max_subagents: number;
+  max_cost_tokens: number;
+  default_triggers: PersonaTriggerDto[];
+}
+
+export type PersonaTriggerDto =
+  | { kind: 'manual' }
+  | { kind: 'on_tab_open'; tab: string }
+  | { kind: 'cron'; schedule: string }
+  | { kind: 'on_build_fail'; command: string }
+  | { kind: 'voice_started'; rms: number }
+  | { kind: 'voice_paused'; duration_ms: number }
+  | { kind: 'slash_command'; command: string; args: string };
+
+/** Payload of the `persona:slash-fired` Tauri event. */
+export type PersonaSlashTrigger = Extract<
+  PersonaTriggerDto,
+  { kind: 'slash_command' }
+>;
+
 // ---------- API keys (keyring-backed) ----------
 
 /**

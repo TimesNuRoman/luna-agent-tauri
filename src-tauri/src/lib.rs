@@ -6732,6 +6732,63 @@ fn persona_reload(app: AppHandle) -> Result<Vec<(String, String)>, String> {
     Ok(out)
 }
 
+/// Phase UX-1. Fire a slash-command persona trigger. The frontend
+/// aug system calls this when the user types `/memory …` or
+/// `/daimonion …` (or any other registered slash). The command looks
+/// up the persona in the registry and emits a `persona:slash-fired`
+/// event the supervisor listens for. The trigger struct itself
+/// (`PersonaTrigger::SlashCommand`) is the wire format.
+///
+/// Returns the resolved `persona_id` on success, or an `Err` for
+/// unknown commands / missing personas. The frontend uses the error
+/// to render an inline chat error without changing the persona.
+#[tauri::command]
+fn persona_fire_slash(
+    command: String,
+    args: String,
+    app: AppHandle,
+) -> Result<String, String> {
+    // Allowlist of slash keywords → persona id mapping. Kept server-side
+    // so the frontend aug registry and the persona registry can't drift.
+    // When a new persona ships, add the line here AND its slashCommands
+    // in src/lib/augmentations.ts.
+    let persona_id = match command.as_str() {
+        "memory" | "remember" | "recall" => "raziel",
+        "azazel" | "browser" => "azazel",
+        "daimonion" | "voice" => "daimonion",
+        "design" | "mephisto" | "mephistopheles" => "mephistopheles",
+        "heal" | "morningstar" => "morningstar",
+        _ => {
+            return Err(format!("unknown slash command: /{command}"));
+        }
+    };
+
+    let deps = app
+        .try_state::<crate::TaskDeps>()
+        .ok_or_else(|| "TaskDeps missing".to_string())?;
+    // Confirm the persona actually loaded — `persona_reload` may have
+    // left the registry empty (e.g. all tomls failed to parse), in
+    // which case the slash silently does nothing.
+    if deps.personas.get(persona_id).is_none() {
+        return Err(format!(
+            "persona '{persona_id}' is not loaded; check the personas/ directory"
+        ));
+    }
+
+    // Emit a Tauri event the supervisor can listen for. We use the
+    // structured `PersonaTrigger::SlashCommand` wire format so the
+    // supervisor can dispatch without parsing a free-form string.
+    use services::agent::personas::PersonaTrigger;
+    let _trigger = PersonaTrigger::SlashCommand {
+        command: command.clone(),
+        args: args.clone(),
+    };
+    if let Err(e) = app.emit("persona:slash-fired", &_trigger) {
+        return Err(format!("emit persona:slash-fired: {e}"));
+    }
+    Ok(persona_id.to_string())
+}
+
 fn persona_error_message(e: &services::agent::personas::PersonaError) -> String {
     use services::agent::personas::PersonaError;
     match e {
@@ -9137,6 +9194,7 @@ pub fn run() {
             persona_list,
             persona_get,
             persona_reload,
+            persona_fire_slash,
             raziel_chat,
             raziel_run_fusion_news,
             // Mephistopheles (P0+ design agent)

@@ -120,6 +120,21 @@ pub enum PersonaTrigger {
         /// the matching `VoiceStarted` to this `VoicePaused`).
         duration_ms: u64,
     },
+    /// Phase UX-1. Fired when the user types a slash command in
+    /// chat that maps to a persona — e.g. `/daimonion ...` or
+    /// `/memory ...`. The supervisor switches into the named
+    /// persona for the duration of the next turn; the following
+    /// user message resets to default. The `command` is the bare
+    /// slash keyword (no leading `/`); `args` is everything after
+    /// the first whitespace (may be empty).
+    SlashCommand {
+        /// Slash command keyword, e.g. `"memory"`, `"daimonion"`,
+        /// `"azazel"`, `"design"`.
+        command: String,
+        /// The rest of the user message after the slash keyword,
+        /// already trimmed. May be empty.
+        args: String,
+    },
 }
 
 /// A named agent. Loaded from a TOML file. The `id` is the canonical
@@ -400,6 +415,71 @@ duration_ms = 2300
                 assert_eq!(*duration_ms, 2300);
             }
             other => panic!("expected VoicePaused, got {other:?}"),
+        }
+    }
+
+    /// Phase UX-1 — slash-command persona trigger. The roundtrip
+    /// proves both serialisation and access by named fields.
+    #[test]
+    fn persona_trigger_slash_command_roundtrip() {
+        let toml_src = r#"
+id = "raziel"
+display_name = "Raziel"
+role = "keeper"
+system_prompt_path = "p.md"
+default_model = "M"
+sub_agent_model = "M2"
+allowed_tools = []
+
+[[default_triggers]]
+kind = "slash_command"
+command = "memory"
+args = "remember I like cats"
+"#;
+        let p: AgentPersona = toml::from_str(toml_src).unwrap();
+        assert_eq!(p.default_triggers.len(), 1);
+        match &p.default_triggers[0] {
+            PersonaTrigger::SlashCommand { command, args } => {
+                assert_eq!(command, "memory");
+                assert_eq!(args, "remember I like cats");
+            }
+            other => panic!("expected SlashCommand, got {other:?}"),
+        }
+        // Roundtrip: serialise back and re-parse.
+        let back = toml::to_string(&p).unwrap();
+        let p2: AgentPersona = toml::from_str(&back).unwrap();
+        match &p2.default_triggers[0] {
+            PersonaTrigger::SlashCommand { command, args } => {
+                assert_eq!(command, "memory");
+                assert_eq!(args, "remember I like cats");
+            }
+            _ => panic!("roundtrip lost the SlashCommand variant"),
+        }
+    }
+
+    /// SlashCommand with empty `args` — should parse and roundtrip.
+    #[test]
+    fn persona_trigger_slash_command_empty_args() {
+        let toml_src = r#"
+id = "daimonion"
+display_name = "Daimonion"
+role = "voice"
+system_prompt_path = "p.md"
+default_model = "M"
+sub_agent_model = "M2"
+allowed_tools = []
+
+[[default_triggers]]
+kind = "slash_command"
+command = "daimonion"
+"#;
+        let p: AgentPersona = toml::from_str(toml_src).unwrap();
+        match &p.default_triggers[0] {
+            PersonaTrigger::SlashCommand { command, args } => {
+                assert_eq!(command, "daimonion");
+                assert_eq!(args, "");
+            }
+            other => panic!("expected SlashCommand, got {other:?}"),
         }
     }
 }

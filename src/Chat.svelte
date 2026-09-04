@@ -83,6 +83,21 @@
     type PlanStep,
     type PlanStepStatus,
   } from './lib/planStore';
+  // Phase UX-1 — chat-side augmentations. Each aug (Memory, Azazel,
+  // Video, Design, Daimonion, 3D, Self) registers itself with the
+  // registry at import time; Chat renders a small AugCard for every
+  // active aug above the message list. Activation happens via
+  // slash commands, tool-use events, or the persona:slash-fired
+  // Tauri event.
+  import { bootstrapAugmentations } from './lib/augmentations-bootstrap';
+  import {
+    resolveSlash,
+    resolveTool,
+    type Augmentation,
+    type AugmentationId,
+  } from './lib/augmentations';
+  import AugCard from './AugCard.svelte';
+  import { personaFireSlash, onPersonaSlashFired } from './lib/tauri';
 
   export let providerLabel = 'Luna Agent';
 
@@ -93,6 +108,76 @@
   // ---- state ----
   type Mode = 'chat' | 'code' | 'research' | 'media' | 'plan';
   let mode: Mode = 'chat';
+
+  // ---- Phase UX-1: chat augmentations ----
+  // Each active aug is one AugInstance keyed by a stable `instanceId`.
+  // The list drives the strip above the message list; dismiss / pin
+  // events from AugCard mutate this map.
+  type AugInstance = {
+    instanceId: string;
+    aug: Augmentation;
+    args: string;
+    pinned: boolean;
+    done: boolean;
+    doneSummary: string | null;
+  };
+  let activeAugs: AugInstance[] = [];
+  let nextAugInstanceId = 1;
+  /** Per-aug-type cap. Avoids the strip getting swamped when a long
+   *  task calls `memory_recall` 50 times in a row. The most recent
+   *  activation wins; older instances of the same aug-id are evicted
+   *  from the head of the list. */
+  const AUG_PER_TYPE_CAP = 4;
+
+  function activateAug(
+    aug: Augmentation,
+    args: string,
+    opts: { pinned?: boolean } = {},
+  ): AugInstance {
+    const instance: AugInstance = {
+      instanceId: `aug-${nextAugInstanceId++}`,
+      aug,
+      args,
+      pinned: !!opts.pinned,
+      done: false,
+      doneSummary: null,
+    };
+    // Evict oldest non-pinned instance of the same aug-id to enforce the cap.
+    const sameType = activeAugs.filter((a) => a.aug.id === aug.id && !a.pinned);
+    if (sameType.length >= AUG_PER_TYPE_CAP) {
+      const evict = sameType[0];
+      activeAugs = activeAugs.filter((a) => a !== evict);
+    }
+    activeAugs = [...activeAugs, instance];
+    return instance;
+  }
+  function dismissAug(instanceId: string) {
+    activeAugs = activeAugs.filter((a) => a.instanceId !== instanceId);
+  }
+  function togglePinAug(instanceId: string) {
+    activeAugs = activeAugs.map((a) =>
+      a.instanceId === instanceId ? { ...a, pinned: !a.pinned } : a,
+    );
+  }
+  function markAugDone(augId: AugmentationId, summary: string) {
+    activeAugs = activeAugs.map((a) =>
+      a.aug.id === augId && !a.pinned
+        ? { ...a, done: true, doneSummary: summary }
+        : a,
+    );
+  }
+  /** Called on every user message: collapses augs with `next_message`
+   *  retention. */
+  function collapseNextMessageAugs() {
+    activeAugs = activeAugs.filter(
+      (a) => a.pinned || a.aug.retention !== 'next_message',
+    );
+  }
+  /** Read-only view for rendering. Sorted: active first, then done. */
+  $: activeAugsView = [
+    ...activeAugs.filter((a) => !a.done),
+    ...activeAugs.filter((a) => a.done),
+  ];
 
   // ---- plan mode composer state ----
   // When `mode === 'plan'`, the composer renders a title field and a
@@ -820,6 +905,9 @@
   let workspaceLoading = false;
   let workspaceUnlisten: Array<() => void> = [];
   let agentUnlisten: Array<() => void> = [];
+  // Phase UX-1: aug-system listeners (persona:slash-fired, azazel:done).
+  // Tore down in onDestroy.
+  let augUnlisten: Array<() => void> = [];
   // File-tool pill tracker: maps Rust's tool_call id to the placeholder
   // message id for `edit_file` / `create_file` tools. This MUST be shared
   // (not per-request) because the matching `ai_file_edit` event comes
@@ -2170,6 +2258,43 @@
     if (inputEl) inputEl.style.height = 'auto';
     errorBanner = '';
 
+    // Phase UX-1: every user message collapses "next_message" augs.
+    // The collapse happens *before* the new aug activation below so
+    // a fresh /memory in the same turn doesn't get immediately
+    // collapsed.
+    collapseNextMessageAugs();
+
+    // ---- Phase UX-1: generic aug slash resolver ----
+    // Catches /memory, /video, /daimonion, /3d, /self, /browser,
+    // /screen, /voice, /evolve, /thoughts, /remember, /recall, /capture
+    // — any slash keyword registered in the aug registry. The /azazel
+    // and /design branches below stay (they have side effects beyond
+    // just rendering a card) but we ALSO activate the aug card here so
+    // the user sees something happen immediately.
+    const earlySlash = resolveSlash(text);
+    if (earlySlash) {
+      activateAug(earlySlash.aug, earlySlash.args, { pinned: false });
+      // Best-effort backend dispatch. Failure is non-fatal — the aug
+      // is already active client-side; the supervisor just won't
+      // switch into the named persona.
+      personaFireSlash(earlySlash.aug.slashCommands[0]?.replace(/^\//, '') ?? '', earlySlash.args)
+        .catch((e) => console.info('[chat] personaFireSlash:', e));
+      // For augs that have a backend run-path, fall through to the
+      // specific handler below (azazelRun, mephistoChat). For augs
+      // without one (memory, video, daimonion, 3d, self), we just
+      // add the user message and stop — the LLM will pick up from
+      // there.
+      const hasBackend =
+        earlySlash.aug.id === 'azazel' || earlySlash.aug.id === 'design';
+      if (!hasBackend) {
+        appendMessage('user', text);
+        // No auto-LLM follow-up for these — the user typed a slash
+        // command and expects to see the aug card. They can press
+        // Enter again or type a follow-up question to engage the LLM.
+        return;
+      }
+    }
+
     // ---- Slash command: /azazel <prompt> (autonomous browser-use) ----
     // Hands the prompt to Azazel (M3 vision-action loop over
     // chromiumoxide) instead of the chat LLM. The user can then
@@ -2492,6 +2617,28 @@
       const argsStr = p.args ? JSON.stringify(p.args, null, 2) : '';
       const pillId = nextId++;
 
+      // Phase UX-1: tool_use → aug activation. Any tool that has
+      // matching toolTriggers in the aug registry lights up the
+      // corresponding sidecard. Pinned augs stay across the next
+      // user message; `next_message` retention augs collapse
+      // naturally when `collapseNextMessageAugs()` runs.
+      const toolAug = resolveTool(p.name);
+      if (toolAug) {
+        // Use the first arg's value (if present) as the human-readable
+        // args preview; fall back to a JSON-ish short string.
+        const firstArg =
+          p.args && typeof p.args === 'object'
+            ? Object.values(p.args)[0]
+            : undefined;
+        const argsPreview =
+          typeof firstArg === 'string'
+            ? firstArg.slice(0, 200)
+            : argsStr
+              ? argsStr.slice(0, 120).replace(/\s+/g, ' ').trim()
+              : '';
+        activateAug(toolAug, argsPreview, { pinned: false });
+      }
+
       // Close out the current text bubble and open a fresh one so
       // the text → tool_use → text pattern renders as visually
       // distinct cards in the chat. (See `rotateTextBubble`.)
@@ -2805,6 +2952,59 @@
   }
 
   onMount(async () => {
+    // Phase UX-1: register the chat augmentations on first mount.
+    // Idempotent — HMR can re-run onMount; the bootstrap guards itself.
+    bootstrapAugmentations();
+
+    // Phase UX-1: forward backend `persona:slash-fired` events into the
+    // local aug system so a backend-driven slash (e.g. from the TG bot
+    // or a sub-agent) lights up the corresponding card.
+    onPersonaSlashFired((trigger) => {
+      const aug = resolveTool(`__slash__:${trigger.command}`);
+      // resolveTool is for tools; use resolveSlash on the full text.
+      const text = `/${trigger.command}${trigger.args ? ' ' + trigger.args : ''}`;
+      const hit = resolveSlash(text);
+      if (hit) {
+        activateAug(hit.aug, hit.args, { pinned: true });
+      }
+    })
+      .then((unsub) => augUnlisten.push(unsub))
+      .catch((e) => console.warn('[chat] onPersonaSlashFired failed', e));
+
+    // Phase UX-1: mark the Azazel aug as done when its task finishes.
+    // We piggy-back on the same listener that AzazelPanel.svelte wires
+    // up via startAzazelListeners(); the store-side listener keeps
+    // running for the legacy tab. We only need a small subscriber
+    // for our own aug state.
+    import('./lib/azazel')
+      .then(({ onAzazelDone }) => onAzazelDone((event) => {
+        const summary =
+          (event as any).summary ??
+          (event as any).final_summary ??
+          `Azazel task ${(event as any).task_id} finished`;
+        markAugDone('azazel', summary);
+      }))
+      .then((unsub) => augUnlisten.push(unsub))
+      .catch((e) => console.warn('[chat] onAzazelDone failed', e));
+
+    // Phase P4: back-compat shim in App.svelte dispatches
+    // `luna:aug-activate` when an old code path sends
+    // `luna:switch-tab` with a removed tab id. Chat (the only place
+    // augs live) lights up the corresponding card.
+    const onAugActivate = (e: Event) => {
+      const ce = e as CustomEvent<{ augId: string; args: string }>;
+      const augId = ce?.detail?.augId as
+        | 'memory' | 'azazel' | 'video' | 'design' | 'daimonion' | 'three_d' | 'self'
+        | undefined;
+      if (!augId) return;
+      import('./lib/augmentations').then(({ get }) => {
+        const aug = get(augId);
+        if (aug) activateAug(aug, ce.detail.args ?? '', { pinned: true });
+      });
+    };
+    window.addEventListener('luna:aug-activate', onAugActivate as EventListener);
+    augUnlisten.push(() => window.removeEventListener('luna:aug-activate', onAugActivate as EventListener));
+
     try {
       const saved = localStorage.getItem(MODEL_STORAGE_KEY);
       if (saved && MODELS.some((m) => m.id === saved)) selectedModelId = saved;
@@ -2940,6 +3140,7 @@
     for (const u of streamUnlisten) try { u(); } catch { /* ignore */ }
     for (const u of workspaceUnlisten) try { u(); } catch { /* ignore */ }
     for (const u of agentUnlisten) try { u(); } catch { /* ignore */ }
+    for (const u of augUnlisten) try { u(); } catch { /* ignore */ }
   });
 </script>
 
@@ -2979,6 +3180,25 @@
   </header>
 
   <main class="scroll" id="chat-scroll" on:scroll={onScroll} on:click={onMessagesClick}>
+    <!-- Phase UX-1: chat augmentations strip. Each AugCard is a small
+         dismissible card for an active aug (memory, azazel, video,
+         design, daimonion, 3d, self). Pin 📌 survives the next user
+         message; otherwise the aug collapses when its retention
+         policy says so. -->
+    {#if activeAugsView.length > 0}
+      <div class="aug-strip" data-testid="aug-strip" role="region" aria-label="Active augmentations">
+        {#each activeAugsView as inst (inst.instanceId)}
+          <AugCard
+            augId={inst.aug.id}
+            instanceId={inst.instanceId}
+            args={inst.args}
+            pinned={inst.pinned}
+            onDismiss={() => dismissAug(inst.instanceId)}
+            onTogglePin={() => togglePinAug(inst.instanceId)}
+          />
+        {/each}
+      </div>
+    {/if}
     {#if mode === 'code'}
       <div class="code-grid">
         <!-- LEFT: file tree -->
@@ -4218,6 +4438,18 @@
   }
   .scroll::-webkit-scrollbar { width: 8px; }
   .scroll::-webkit-scrollbar-thumb { background: #2c313a; border-radius: 4px; }
+
+  /* ---- Phase UX-1: chat augmentation strip ---- */
+  .aug-strip {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0 0 8px 0;
+    padding: 0;
+  }
+  .aug-strip :global(.aug-card) {
+    margin: 0;
+  }
 
   /* ---- Message rows: avatar + bubble ---- */
   .msg-row {

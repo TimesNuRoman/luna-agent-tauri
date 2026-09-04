@@ -1,16 +1,10 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
-  import VideoMode from './VideoMode.svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import Chat from './Chat.svelte';
   import Settings from './Settings.svelte';
-  import Memory from './Memory.svelte';
-  import ThreeD from './ThreeD.svelte';
-  import SelfEvolution from './SelfEvolution.svelte';
   import TasksSidebar from './TasksSidebar.svelte';
   import PlansSidebar from './PlansSidebar.svelte';
   import DesignStudio from './DesignStudio.svelte';
-  import Daimonion from './Daimonion.svelte';
-  import AzazelPanel from './AzazelPanel.svelte';
   import { appWindow, getTelegramStatus } from './lib/tauri';
   import type { TelegramStatus } from './lib/tauri';
   import { apiKeyStatus, refreshKeyStatus } from './lib/keyStore';
@@ -18,8 +12,28 @@
   import { onTaskFinished } from './lib/taskClient';
   import { statusLabel } from './lib/taskClient';
   import { azazelStore, runningTaskIds } from './lib/stores/azazel';
+  // Phase UX-1: the augmentations registry is imported for side
+  // effects (registers all built-in augs at module load). The actual
+  // aug cards live inside <Chat>.
+  import { bootstrapAugmentations } from './lib/augmentations-bootstrap';
 
-  type TabId = 'chat' | 'video' | 'memory' | 'settings' | 'three_d' | 'self_evolution' | 'daimonion' | 'azazel';
+  type TabId = 'chat' | 'settings';
+  /** Single source of truth for valid CURRENT tab IDs. Legacy tab
+   *  ids (video, memory, azazel, three_d, self_evolution, daimonion)
+   *  are accepted by the back-compat shim (see LEGACY_TAB_TO_AUG) and
+   *  re-routed to the chat-side aug system. */
+  const ALL_TABS: ReadonlySet<TabId> = new Set(['chat', 'settings']);
+  /** Map legacy tab ids to the aug they used to host. The shim uses
+   *  this to convert a `luna:switch-tab` event with a removed tab id
+   *  into "activate this aug, switch to chat". */
+  const LEGACY_TAB_TO_AUG: ReadonlyMap<string, string> = new Map([
+    ['video', 'video'],
+    ['memory', 'memory'],
+    ['azazel', 'azazel'],
+    ['three_d', 'three_d'],
+    ['self_evolution', 'self'],
+    ['daimonion', 'daimonion'],
+  ]);
   type SidebarMode = 'none' | 'tasks' | 'plans' | 'design';
   let activeTab: TabId = 'chat';
   // One sidebar slot. Default to `plans` — the new feature we want
@@ -87,6 +101,11 @@
   }
 
   onMount(async () => {
+    // Phase UX-1: register all built-in chat augmentations (memory,
+    // azazel, video, design, daimonion, 3d, self) on first mount.
+    // Idempotent — the bootstrap guards itself against re-runs.
+    bootstrapAugmentations();
+
     // Pull initial key status from the keyring. Chat and Settings also
     // call this in their own onMount; the keyStore dedupes the IPC call
     // via an in-flight promise so the keyring is hit at most once.
@@ -163,15 +182,21 @@
    *  flag all live in one place. */
   async function handleRunPlan(plan: Plan) {
     if (activeTab !== 'chat') switchTo('chat');
-    // Small tick so Chat has a chance to mount if we just switched
-    // tabs from a non-chat tab (the binding updates after the
-    // tab-panel re-renders).
-    await Promise.resolve();
-    if (chatRef && typeof (chatRef as any).runPlanFromSidebar === 'function') {
-      await (chatRef as any).runPlanFromSidebar(plan);
-    } else {
-      console.warn('[App] chatRef missing runPlanFromSidebar');
+    // Svelte's tick() flushes pending DOM updates so the <Chat>
+    // component has actually mounted and bound its `this={chatRef}`.
+    // We retry for up to 500ms because on slow Tauri webviews a
+    // single tick isn't always enough for the component to finish
+    // its onMount.
+    await tick();
+    const deadline = Date.now() + 500;
+    while (Date.now() < deadline) {
+      if (chatRef && typeof (chatRef as any).runPlanFromSidebar === 'function') {
+        await (chatRef as any).runPlanFromSidebar(plan);
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 20));
     }
+    console.warn('[App] chatRef missing runPlanFromSidebar after 500ms');
   }
 
   function handleContinuePlan(plan: Plan) {
@@ -184,18 +209,13 @@
     sidebarMode = e.detail.mode;
   }
 
-  // Tab order used by both the keyboard shortcut (Ctrl/Cmd+1..6,
-  // Ctrl+Tab) and the Next/Prev helpers. Kept in one place so adding
-  // a new tab is a one-line change.
-  const TAB_ORDER: TabId[] = ['chat', 'video', 'memory', 'azazel', 'three_d', 'self_evolution', 'settings'];
+  // Tab order used by Ctrl/Cmd+Tab (next/prev). Phase UX-1 collapsed
+  // the strip to Chat + Settings; legacy ids are routed through
+  // LEGACY_TAB_TO_AUG on `luna:switch-tab` events.
+  const TAB_ORDER: TabId[] = ['chat', 'settings'];
   const TAB_HOTKEY: Record<string, TabId> = {
     '1': 'chat',
-    '2': 'video',
-    '3': 'memory',
-    '4': 'azazel',
-    '5': 'three_d',
-    '6': 'self_evolution',
-    '7': 'settings',
+    '2': 'settings',
   };
 
   function nextTab(dir: 1 | -1) {
@@ -227,7 +247,7 @@
       }
       return;
     }
-    if (e.key >= '1' && e.key <= '6' && !editable) {
+    if (e.key >= '1' && e.key <= '2' && !editable) {
       const target = TAB_HOTKEY[e.key];
       if (target) {
         e.preventDefault();
@@ -247,11 +267,34 @@
     // Cross-component tab switch: any child can `dispatchEvent(new
     // CustomEvent('luna:switch-tab', { detail: 'settings' }))` and we
     // honor it. Used by ThreeDChat's "Open Settings" banner.
+    // ALL_TABS is the single source of truth for current tabs.
+    // Legacy tab ids (video, memory, azazel, three_d, self_evolution,
+    // daimonion) are intercepted by the shim and converted to
+    // "activate this aug, switch to chat" — Phase P4 back-compat.
     function onSwitchTab(e: Event) {
       const ce = e as CustomEvent<string>;
       const tab = ce?.detail;
-      if (tab === 'chat' || tab === 'video' || tab === 'memory' || tab === 'settings' || tab === 'three_d' || tab === 'self_evolution') {
+      if (typeof tab !== 'string') return;
+      if (ALL_TABS.has(tab as TabId)) {
         switchTo(tab as TabId);
+        return;
+      }
+      const augId = LEGACY_TAB_TO_AUG.get(tab);
+      if (augId) {
+        // Phase P4 shim. Log once per release so old plugin code can
+        // self-update. The card activation is delivered through a
+        // dedicated event because Chat owns the activeAugs map.
+        console.info(
+          `[App] legacy tab "${tab}" re-routed to aug "${augId}". ` +
+            `Direct luna:switch-tab to "${tab}" is deprecated; the aug ` +
+            `system now owns this surface.`,
+        );
+        window.dispatchEvent(
+          new CustomEvent('luna:aug-activate', {
+            detail: { augId, args: '' },
+          }),
+        );
+        switchTo('chat');
       }
     }
     window.addEventListener('luna:switch-tab', onSwitchTab as EventListener);
@@ -273,10 +316,10 @@
       <span class="brand-name">Luna Agent</span>
     </div>
 
-    <!-- Tabs: buttons opt out of drag. `tabindex` follows the roving
-         pattern (active = 0, others = -1) so Tab/Shift+Tab move *into*
-         and *out of* the tabstrip as a single stop, while arrow keys
-         (handled by browser) move between siblings. -->
+    <!-- Tabs: phase UX-1 collapsed the strip to Chat + Settings. The
+         other six surfaces (video / memory / azazel / 3d / self /
+         daimonion) live as chat-side augmentations and are activated
+         by slash commands, tool_use, or the legacy-tab shim. -->
     <nav class="tabs" aria-label="Разделы" role="tablist">
       <button
         role="tab"
@@ -284,61 +327,19 @@
         aria-selected={activeTab === 'chat'}
         tabindex={activeTab === 'chat' ? 0 : -1}
         on:click={() => switchTo('chat')}
-        title="Чат (Ctrl+1)">💬 Chat</button>
-      <button
-        role="tab"
-        class:on={activeTab === 'video'}
-        aria-selected={activeTab === 'video'}
-        tabindex={activeTab === 'video' ? 0 : -1}
-        on:click={() => switchTo('video')}
-        title="Video Mode (Ctrl+2)">🎥 Video Mode</button>
-      <button
-        role="tab"
-        class:on={activeTab === 'memory'}
-        aria-selected={activeTab === 'memory'}
-        tabindex={activeTab === 'memory' ? 0 : -1}
-        on:click={() => switchTo('memory')}
-        title="Memory (Ctrl+3)">🧠 Memory</button>
-      <button
-        role="tab"
-        class:on={activeTab === 'azazel'}
-        aria-selected={activeTab === 'azazel'}
-        tabindex={activeTab === 'azazel' ? 0 : -1}
-        on:click={() => switchTo('azazel')}
-        title="Azazel — autonomous browser-use agent (Ctrl+4)">
-        😈 Azazel
+        title="Чат (Ctrl+1)">
+        💬 Chat
         {#if $runningTaskIds.length > 0}
           <span class="badge">{$runningTaskIds.length}</span>
         {/if}
       </button>
       <button
         role="tab"
-        class:on={activeTab === 'three_d'}
-        aria-selected={activeTab === 'three_d'}
-        tabindex={activeTab === 'three_d' ? 0 : -1}
-        on:click={() => switchTo('three_d')}
-        title="Luna 3D Thoughts — proprietary editor (Ctrl+5)">💭 3D Thoughts</button>
-      <button
-        role="tab"
-        class:on={activeTab === 'self_evolution'}
-        aria-selected={activeTab === 'self_evolution'}
-        tabindex={activeTab === 'self_evolution' ? 0 : -1}
-        on:click={() => switchTo('self_evolution')}
-        title="Self-evolution (Ctrl+5)">🧬 Self</button>
-      <button
-        role="tab"
-        class:on={activeTab === 'daimonion'}
-        aria-selected={activeTab === 'daimonion'}
-        tabindex={activeTab === 'daimonion' ? 0 : -1}
-        on:click={() => switchTo('daimonion')}
-        title="Daimonion — voice-first assistant (Ctrl+7)">🔮 Daimonion</button>
-      <button
-        role="tab"
         class:on={activeTab === 'settings'}
         aria-selected={activeTab === 'settings'}
         tabindex={activeTab === 'settings' ? 0 : -1}
         on:click={() => switchTo('settings')}
-        title="Settings (Ctrl+6)">⚙ Settings</button>
+        title="Settings (Ctrl+2)">⚙ Settings</button>
     </nav>
 
     <!-- Right cluster: status pill + window controls -->
@@ -364,9 +365,10 @@
   </header>
 
   <!-- Body: optional sidebar + tab content. Only one of Tasks / Plans
-       is visible at a time, controlled by `sidebarMode`. -->
+       is visible at a time, controlled by `sidebarMode`. Phase UX-1
+       collapsed the tabs to chat + settings; only chat has a sidebar. -->
   <div class="body">
-    {#if (activeTab === 'chat' || activeTab === 'self_evolution')}
+    {#if activeTab === 'chat'}
       {#if sidebarMode === 'tasks'}
         <TasksSidebar on:switch={handleSwitchSidebar} />
       {:else if sidebarMode === 'plans'}
@@ -381,22 +383,11 @@
       {/if}
     {/if}
 
-    <!-- Content -->
+    <!-- Content. Phase UX-1: only Chat and Settings are top-level
+         tabs. All other surfaces live as aug cards inside <Chat>. -->
     <section class="tab-panel" role="tabpanel">
     {#if activeTab === 'chat'}
       <Chat providerLabel="Luna Agent" bind:busy={chatBusy} bind:this={chatRef} />
-    {:else if activeTab === 'video'}
-      <VideoMode />
-    {:else if activeTab === 'memory'}
-      <Memory />
-    {:else if activeTab === 'three_d'}
-      <ThreeD />
-    {:else if activeTab === 'self_evolution'}
-      <SelfEvolution />
-    {:else if activeTab === 'daimonion'}
-      <Daimonion />
-    {:else if activeTab === 'azazel'}
-      <AzazelPanel />
     {:else}
       <Settings {theme} {setTheme} />
     {/if}
