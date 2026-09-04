@@ -2275,6 +2275,41 @@ fn luna_tools_schema() -> serde_json::Value {
                 }
             }
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "azazel_run",
+                "description": "Dispatch a browser-automation task to Azazel, Luna's autonomous browser agent. Azazel opens a real Chromium tab, navigates, clicks, types, extracts, and reports back. Use this for ANY task that requires interacting with a website: logging in (social media, banking, SaaS, email), filling forms, posting content (status updates, comments, images), scraping structured data from logged-in pages, multi-step web workflows. Returns a task_id immediately; the actual run is async and streams live screenshots / action timeline through the chat aug card. Do NOT call for static read-only fetches (use web_search or fetch_url for that). Do NOT call for local file or shell work (use read_file / run_command). For an empty Azazel session (no live run), the user can also type /azazel <prompt> in chat to start one manually.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "What Azazel should do. Be specific: target URL, what to log in / click / type, what the end state should look like. Example: 'Log into VK with the credentials from user_interests, navigate to my profile, post a picture of a cat on the wall with the caption от луны'."
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Short human-readable label for the task (<= 60 chars). Shows in the chat aug card and the Azazel panel."
+                        }
+                    },
+                    "required": ["prompt"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "azazel_status",
+                "description": "Check the state of a previously dispatched Azazel task. Returns running|done|error and the latest summary. Use after azazel_run to wait for completion or get the final report.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": { "type": "string", "description": "The task_id returned by azazel_run." }
+                    },
+                    "required": ["task_id"]
+                }
+            }
+        },
         // -----------------------------------------------------------------
         // Telegram bot tools. These let the user (and the agent) configure
         // the remote-control Telegram bot from inside the chat: set / clear
@@ -4189,6 +4224,181 @@ async fn minimax_chat_stream(
                                 let _ = app.emit("ai_tool_result", serde_json::json!({
                                     "id": id, "name": name, "ok": false, "url": url, "error": e,
                                 }));
+                            }
+                        }
+                        continue;
+                    }
+                    // ------------------------------------------------------------
+                    // Azazel (browser-automation agent) tool. Returns a
+                    // task_id immediately; the actual run is async and
+                    // streams progress through the chat aug card.
+                    // ------------------------------------------------------------
+                    if name == "azazel_run" {
+                        let args: serde_json::Value = serde_json::from_str(args_str)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        let prompt = args
+                            .get("prompt")
+                            .and_then(|p| p.as_str())
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        if prompt.is_empty() {
+                            let tool_msg = serde_json::json!({
+                                "role": "tool",
+                                "tool_call_id": id,
+                                "content": "Error: azazel_run requires a non-empty `prompt`.",
+                            });
+                            messages.push(tool_msg);
+                            let _ = app.emit("ai_tool_result", serde_json::json!({
+                                "id": id, "name": name, "ok": false,
+                                "error": "prompt is empty",
+                            }));
+                            continue;
+                        }
+                        let title = args
+                            .get("title")
+                            .and_then(|t| t.as_str())
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| prompt.chars().take(60).collect());
+                        // Surface the tool_use to the front-end so the
+                        // Azazel sidecard opens in chat.
+                        let _ = app.emit(
+                            "ai_tool_use",
+                            serde_json::json!({
+                                "id": id, "name": name,
+                                "args": { "prompt": &prompt, "title": &title },
+                            }),
+                        );
+                        // Inlined body of the `azazel_run` Tauri command
+                        // (Rust-to-Rust call; we don't go through IPC).
+                        // Mirrors services::azazel_run but stays in
+                        // this process so the tool result is consistent
+                        // with the rest of the doChat loop.
+                        use services::agent::task::defaults;
+                        let result: Result<String, String> = (|| {
+                            let state = app.state::<crate::TaskDeps>();
+                            let mut mgr = state.task_manager.lock();
+                            let id = format!("task-{}", uuid::Uuid::new_v4());
+                            let task = services::agent::Task::new_browser(
+                                id.clone(),
+                                title.clone(),
+                                prompt.clone(),
+                                defaults::DEFAULT_MODEL.to_string(),
+                                defaults::DEFAULT_SUBAGENT_MODEL.to_string(),
+                                None,
+                                30,
+                                0,
+                                200_000,
+                            );
+                            let app_for_runner = app.clone();
+                            let id_for_runner = id.clone();
+                            mgr.create(task, move |_handle| {
+                                services::agent::TaskRunner::spawn(
+                                    app_for_runner,
+                                    id_for_runner,
+                                );
+                            })
+                            .map_err(|e| e.to_string())
+                            .map(|_| id)
+                        })();
+                        match result {
+                            Ok(task_id) => {
+                                let tool_msg = serde_json::json!({
+                                    "role": "tool",
+                                    "tool_call_id": id,
+                                    "content": format!(
+                                        "Azazel task `{task_id}` started. The user can watch the live screenshot + action timeline in the chat Azazel card (or the Azazel tab). The task runs async; its final summary is delivered through the chat aug card, so you usually do not need to poll further."
+                                    ),
+                                });
+                                messages.push(tool_msg);
+                                let _ = app.emit("ai_tool_result", serde_json::json!({
+                                    "id": id, "name": name, "ok": true,
+                                    "task_id": task_id, "title": title,
+                                }));
+                                any_executed = true;
+                            }
+                            Err(e) => {
+                                let tool_msg = serde_json::json!({
+                                    "role": "tool",
+                                    "tool_call_id": id,
+                                    "content": format!("Error starting Azazel: {e}"),
+                                });
+                                messages.push(tool_msg);
+                                let _ = app.emit("ai_tool_result", serde_json::json!({
+                                    "id": id, "name": name, "ok": false,
+                                    "error": format!("{e}"),
+                                }));
+                            }
+                        }
+                        continue;
+                    }
+                    if name == "azazel_status" {
+                        let args: serde_json::Value = serde_json::from_str(args_str)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        let task_id = args
+                            .get("task_id")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        if task_id.is_empty() {
+                            let tool_msg = serde_json::json!({
+                                "role": "tool",
+                                "tool_call_id": id,
+                                "content": "Error: azazel_status requires `task_id`.",
+                            });
+                            messages.push(tool_msg);
+                            continue;
+                        }
+                        // Read the task from TaskManager via the
+                        // underlying TaskStore. We surface status +
+                        // error (if any) + step count; the rich
+                        // per-step summary is delivered through the
+                        // chat aug card so the model doesn't need to
+                        // poll it.
+                        let result: Result<(String, String, u32), String> = (|| {
+                            let state = app.state::<crate::TaskDeps>();
+                            let mgr = state.task_manager.lock();
+                            let t = mgr
+                                .store()
+                                .get(&task_id)
+                                .map_err(|e| format!("store: {e}"))?;
+                            let status = format!("{:?}", t.status);
+                            let err = t.error.clone().unwrap_or_default();
+                            Ok((status, err, t.steps_completed))
+                        })();
+                        match result {
+                            Ok((status, err, steps)) => {
+                                let body = if err.is_empty() {
+                                    format!(
+                                        "Azazel task `{task_id}`: status={status}, steps={steps}. \
+                                         The final summary is delivered through the chat \
+                                         Azazel card; no need to poll."
+                                    )
+                                } else {
+                                    format!(
+                                        "Azazel task `{task_id}`: status={status}, steps={steps}, \
+                                         error={err}"
+                                    )
+                                };
+                                let tool_msg = serde_json::json!({
+                                    "role": "tool",
+                                    "tool_call_id": id,
+                                    "content": body,
+                                });
+                                messages.push(tool_msg);
+                                let _ = app.emit("ai_tool_result", serde_json::json!({
+                                    "id": id, "name": name, "ok": true,
+                                    "task_id": task_id, "status": status, "steps": steps,
+                                }));
+                            }
+                            Err(e) => {
+                                let tool_msg = serde_json::json!({
+                                    "role": "tool",
+                                    "tool_call_id": id,
+                                    "content": format!("Error: {e}"),
+                                });
+                                messages.push(tool_msg);
                             }
                         }
                         continue;
