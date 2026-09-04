@@ -521,6 +521,146 @@
   let downloadProgress = '';
   let downloadPct: number | null = null;
 
+  // ---- VAD (voice activity detection) ----
+  // The stt plugin only transcribes on explicit `stop_listening`. To
+  // give a "tap once, speak, auto-stop" UX we open a parallel mic
+  // stream via Web Audio API, compute RMS every 50 ms, and call
+  // `stt.stopListening()` once the user has been silent for
+  // VAD_SILENCE_MS. Mirrors the Daimonion VAD concept (D1+) but
+  // runs on the frontend to keep the vendored stt plugin untouched.
+  // The plugin's own cpal stream is left running in parallel; modern
+  // browsers share the mic device.
+  const VAD_SILENCE_MS = 700;   // how long to wait after speech ends
+  const VAD_FRAME_MS = 50;      // analysis window
+  const VAD_SPEECH_RMS = 0.012; // threshold above which we count as "speaking"
+  const VAD_MAX_RMS = 0.30;     // threshold for hard cap (e.g. claps)
+  let vadStream: MediaStream | null = null;
+  let vadAudioCtx: AudioContext | null = null;
+  let vadAnalyser: AnalyserNode | null = null;
+  let vadRafId: number | null = null;
+  let vadStartedAt = 0;
+  let vadSpeaking = false;
+  let vadSilentRun = 0;
+  function vadCleanup() {
+    if (vadRafId !== null) {
+      cancelAnimationFrame(vadRafId);
+      vadRafId = null;
+    }
+    if (vadAnalyser) { try { vadAnalyser.disconnect(); } catch { /* noop */ } }
+    if (vadAudioCtx && vadAudioCtx.state !== 'closed') {
+      vadAudioCtx.close().catch(() => {});
+    }
+    if (vadStream) {
+      vadStream.getTracks().forEach((t) => t.stop());
+    }
+    vadStream = null;
+    vadAudioCtx = null;
+    vadAnalyser = null;
+    vadSpeaking = false;
+    vadSilentRun = 0;
+  }
+  async function vadStart() {
+    if (vadAudioCtx) return; // already running
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          // Match what the plugin requests so the OS doesn't spawn
+          // separate processing chains.
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+        video: false,
+      });
+      vadStream = stream;
+      const AC = (window.AudioContext || (window as any).webkitAudioContext) as typeof AudioContext;
+      const ctx = new AC();
+      vadAudioCtx = ctx;
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.4;
+      src.connect(analyser);
+      vadAnalyser = analyser;
+      vadStartedAt = performance.now();
+      // Use a single AnalyserNode + rAF loop instead of a setInterval:
+      // rAF pauses with the tab (no wasted CPU on a backgrounded chat)
+      // and the time-domain data is sampled at vsync rate.
+      const buf = new Float32Array(analyser.fftSize);
+      const tick = () => {
+        if (!vadAnalyser || voiceState !== 'recording') {
+          vadRafId = null;
+          return;
+        }
+        analyser.getFloatTimeDomainData(buf);
+        // RMS over the frame
+        let sumSq = 0;
+        for (let i = 0; i < buf.length; i++) {
+          const v = buf[i];
+          sumSq += v * v;
+        }
+        const rms = Math.sqrt(sumSq / buf.length);
+        // Hard-cap on absurd levels (e.g. mic bump) so we don't think
+        // silence never happened.
+        const clamped = Math.min(rms, VAD_MAX_RMS);
+        const isSpeech = clamped > vadThreshold;
+        const elapsed = performance.now() - vadStartedAt;
+        if (isSpeech) {
+          vadSpeaking = true;
+          vadSilentRun = 0;
+        } else if (vadSpeaking) {
+          vadSilentRun += VAD_FRAME_MS;
+        }
+        // Three trigger conditions:
+        //   1. user spoke and then was silent long enough → auto-stop
+        //   2. we've been listening for >25s without any speech → bail
+        //   3. explicit stop_listening will be called by the user; we
+        //      just exit the rAF loop in that case (voiceState check).
+        if (vadSpeaking && vadSilentRun >= VAD_SILENCE_MS) {
+          vadCleanup();
+          // Defer to next tick so we don't call stopListening from
+          // inside the rAF callback (which can re-enter the plugin).
+          queueMicrotask(() => {
+            if (voiceState === 'recording') {
+              stt.stopListening().catch((e) => {
+                voiceError = `auto-stop: ${e}`;
+              });
+            }
+          });
+          return;
+        } else if (!vadSpeaking && elapsed > 25_000) {
+          // 25s of pure silence — give up so we don't burn the mic.
+          vadCleanup();
+          queueMicrotask(() => {
+            if (voiceState === 'recording') {
+              stt.stopListening().catch(() => {});
+            }
+          });
+          return;
+        }
+        vadRafId = requestAnimationFrame(tick);
+      };
+      vadRafId = requestAnimationFrame(tick);
+    } catch (e) {
+      // getUserMedia may fail (no permission, no device, busy by
+      // another app). VAD is best-effort — the user can still press
+      // the mic button again to manually stop.
+      console.warn('[vad] start failed:', e);
+      vadCleanup();
+    }
+  }
+  // Expose VAD threshold to the user. Picked up from localStorage so
+  // the value survives restarts; defaults to the constants above.
+  const VAD_THRESH_STORAGE_KEY = 'luna.chat.vadThreshold';
+  let vadThreshold = VAD_SPEECH_RMS;
+  try {
+    const stored = localStorage.getItem(VAD_THRESH_STORAGE_KEY);
+    if (stored !== null) {
+      const v = parseFloat(stored);
+      if (Number.isFinite(v) && v > 0 && v < 1) vadThreshold = v;
+    }
+  } catch { /* ignore */ }
+
   // ---- voice output (TTS) ----
   // Real-time TTS for assistant messages. While `ttsEnabled` is on,
   // every streaming assistant message is split on sentence boundaries
@@ -767,11 +907,19 @@
     voiceError = '';
     try {
       if (voiceState === 'recording') {
+        // User explicitly stopped — make sure VAD doesn't also fire
+        // a stop_listening right after.
+        vadCleanup();
         await stt.stopListening();
       } else if (voiceState !== 'transcribing') {
         await stt.startListening({ maxDuration: 30_000 });
+        // Start the parallel VAD monitor so silence auto-stops the
+        // recording. Failure is non-fatal — the user can still hit
+        // the mic button to manually stop.
+        vadStart();
       }
     } catch (e) {
+      vadCleanup();
       voiceError = String(e);
     }
   }
@@ -3702,10 +3850,22 @@
     try {
       voiceUnlistens.push(
         await onSttStateChange((p) => {
-          if (p.state === 'idle') voiceState = 'idle';
-          else if (p.state === 'listening') voiceState = 'recording';
-          else if (p.state === 'processing') voiceState = 'transcribing';
-          else voiceState = p.state;
+          if (p.state === 'idle') {
+            voiceState = 'idle';
+            // The plugin finished the session (either we stopped it,
+            // VAD auto-stopped it, or maxDuration tripped). Clean up
+            // the parallel VAD stream so the mic indicator turns off.
+            vadCleanup();
+          } else if (p.state === 'listening') {
+            voiceState = 'recording';
+          } else if (p.state === 'processing') {
+            voiceState = 'transcribing';
+            // Processing means the plugin is running Whisper on the
+            // captured buffer — no more audio coming in.
+            vadCleanup();
+          } else {
+            voiceState = p.state;
+          }
         }),
       );
       voiceUnlistens.push(
@@ -3793,6 +3953,8 @@
   onDestroy(() => {
     // TTS cleanup: stop any in-flight audio + clear state.
     stopTts();
+    // VAD cleanup: close the parallel mic stream + AudioContext.
+    vadCleanup();
     for (const u of voiceUnlistens) try { u(); } catch { /* ignore */ }
     for (const u of streamUnlisten) try { u(); } catch { /* ignore */ }
     for (const u of workspaceUnlisten) try { u(); } catch { /* ignore */ }
