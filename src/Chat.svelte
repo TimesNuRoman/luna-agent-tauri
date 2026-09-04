@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import {
     getApiKey,
@@ -83,7 +83,7 @@
     type PlanStep,
     type PlanStepStatus,
   } from './lib/planStore';
-  // Phase UX-1 — chat-side augmentations. Each aug (Memory, Azazel,
+  // Phase UX-1 вЂ” chat-side augmentations. Each aug (Memory, Azazel,
   // Video, Design, Daimonion, 3D, Self) registers itself with the
   // registry at import time; Chat renders a small AugCard for every
   // active aug above the message list. Activation happens via
@@ -97,6 +97,7 @@
     type AugmentationId,
   } from './lib/augmentations';
   import AugCard from './AugCard.svelte';
+  import CredentialManager from './CredentialManager.svelte';
   import { personaFireSlash, onPersonaSlashFired } from './lib/tauri';
 
   export let providerLabel = 'Luna Agent';
@@ -227,7 +228,7 @@
   }
 
   async function persistChat(msgs: typeof messages) {
-    // Don't save an empty conversation (e.g. right after reset) — the
+    // Don't save an empty conversation (e.g. right after reset) вЂ” the
     // backend's derive_chat_name would produce a generic timestamp.
     const real = msgs.filter((m) => m.role !== 'system');
     if (real.length === 0) return;
@@ -300,7 +301,7 @@
   }
 
   async function nukeAllChats() {
-    if (!confirm('Удалить ВСЮ историю чатов? Это необратимо.')) return;
+    if (!confirm('РЈРґР°Р»РёС‚СЊ Р’РЎР® РёСЃС‚РѕСЂРёСЋ С‡Р°С‚РѕРІ? Р­С‚Рѕ РЅРµРѕР±СЂР°С‚РёРјРѕ.')) return;
     try {
       if (chatSaveTimer) {
         clearTimeout(chatSaveTimer);
@@ -335,11 +336,11 @@
     setTimeout(() => doChat(), 0);
   }
 
-  // The user picked "Свой ответ" — pre-fill the composer with the
+  // The user picked "РЎРІРѕР№ РѕС‚РІРµС‚" вЂ” pre-fill the composer with the
   // question as a hint and focus it. They can edit and hit Enter.
   function focusComposerForAskUser(question: string) {
     pendingAskUser = null;
-    inputText = question ? question + ' — ' : '';
+    inputText = question ? question + ' вЂ” ' : '';
     setTimeout(() => inputEl?.focus(), 50);
   }
   let mediaSearch = '';
@@ -355,15 +356,15 @@
   // When ON, the next chat request is prefixed with a system message that
   // tells the model to fan out via `parallel_research` / `parallel_generate_images`
   // instead of running things sequentially. The hint is sent in the request
-  // body only — it never lands in `history` or in the visible chat.
+  // body only вЂ” it never lands in `history` or in the visible chat.
   const MULTITASK_STORAGE_KEY = 'luna.chat.multitask';
   const MULTITASK_HINT =
     '[MULTITASK MODE] The user has enabled parallel-mode for this turn. ' +
     'Prefer fan-out tools: use `parallel_research` when the question spans ' +
     '2+ topics (compare, survey, news across subjects), and ' +
     '`parallel_generate_images` when the user wants several visuals at once. ' +
-    'Keep individual sub-queries short (1–4 words). Do not narrate the ' +
-    'parallelism — just call the tool.';
+    'Keep individual sub-queries short (1вЂ“4 words). Do not narrate the ' +
+    'parallelism вЂ” just call the tool.';
   let multitask = false;
   let nextId = 1;
 
@@ -520,9 +521,9 @@
   function postponeModel() { autoModalOpen = false; }
   function dismissModel() { autoModalOpen = false; }
 
-  // MiniMax key — now derived from the shared `keyStore` (see the `$:`
+  // MiniMax key вЂ” now derived from the shared `keyStore` (see the `$:`
   // declaration near the top of the script). We still need `checkingKeys`
-  // for the header pill ("…", "set", "missing") until the first refresh
+  // for the header pill ("вЂ¦", "set", "missing") until the first refresh
   // completes.
   $: checkingKeys = $apiKeyStatus === 'unknown';
 
@@ -547,7 +548,7 @@
   // ---- context usage ----
   // Show the user how full the model's context window is. Recomputed
   // whenever the visible message list or the current model changes.
-  // The token estimate is approximate — we count characters (with
+  // The token estimate is approximate вЂ” we count characters (with
   // a per-grapheme weight) since real tokenization would require
   // shipping a tokenizer in the bundle.
   function estimateTokens(text: string): number {
@@ -604,7 +605,7 @@
         perMessage.push({ id: m.id, role: m.role, preview: text.slice(0, 60), tokens: tokens + 4 });
       }
     }
-    // The model also burns tokens for system prompt + tool schemas —
+    // The model also burns tokens for system prompt + tool schemas вЂ”
     // bake in a flat overhead so the gauge doesn't sit at 0% early.
     used += 600;
     const pct = window > 0 ? Math.min(100, Math.round((used / window) * 100)) : 0;
@@ -629,11 +630,11 @@
   }
   function clearContext() {
     if (busy) return;
-    if (!confirm('Очистить историю чата? Контекст сбросится, текущая беседа удалится.')) return;
+    if (!confirm('РћС‡РёСЃС‚РёС‚СЊ РёСЃС‚РѕСЂРёСЋ С‡Р°С‚Р°? РљРѕРЅС‚РµРєСЃС‚ СЃР±СЂРѕСЃРёС‚СЃСЏ, С‚РµРєСѓС‰Р°СЏ Р±РµСЃРµРґР° СѓРґР°Р»РёС‚СЃСЏ.')) return;
     messages = [];
     history = [];
     researchResults = [];
-    appendMessage('system', 'Чат очищен.');
+    appendMessage('system', 'Р§Р°С‚ РѕС‡РёС‰РµРЅ.');
     contextPopover = false;
   }
   // ---- "real" context payload ----
@@ -644,11 +645,11 @@
   // will see minus the Rust-side system prompt + tool schemas.
   //
   // Each item carries:
-  //   - `msgId`  — the original message id, used for scroll-into-view
-  //   - `kind`   — display category for the summary breakdown
-  //   - `role`   — raw API role
-  //   - `content`— full reconstructed text (not a preview)
-  //   - `tokens` / `chars` — usage estimate
+  //   - `msgId`  вЂ” the original message id, used for scroll-into-view
+  //   - `kind`   вЂ” display category for the summary breakdown
+  //   - `role`   вЂ” raw API role
+  //   - `content`вЂ” full reconstructed text (not a preview)
+  //   - `tokens` / `chars` вЂ” usage estimate
   type RealContextKind = 'system' | 'user' | 'assistant' | 'thinking' | 'tool' | 'image' | 'plan' | 'web' | 'subagent' | 'file';
   type RealContextItem = {
     id: string;
@@ -670,10 +671,10 @@
       msgId: 0,
       kind: 'system',
       role: 'system',
-      content: '[Системный промпт + схемы инструментов]\nФормируется на стороне Rust. Содержит инструкции поведения ассистента, описание доступных tool calls (web_search, parallel_research, parallel_generate_images, generate_image) и правила формата ответов.',
+      content: '[РЎРёСЃС‚РµРјРЅС‹Р№ РїСЂРѕРјРїС‚ + СЃС…РµРјС‹ РёРЅСЃС‚СЂСѓРјРµРЅС‚РѕРІ]\nР¤РѕСЂРјРёСЂСѓРµС‚СЃСЏ РЅР° СЃС‚РѕСЂРѕРЅРµ Rust. РЎРѕРґРµСЂР¶РёС‚ РёРЅСЃС‚СЂСѓРєС†РёРё РїРѕРІРµРґРµРЅРёСЏ Р°СЃСЃРёСЃС‚РµРЅС‚Р°, РѕРїРёСЃР°РЅРёРµ РґРѕСЃС‚СѓРїРЅС‹С… tool calls (web_search, parallel_research, parallel_generate_images, generate_image) Рё РїСЂР°РІРёР»Р° С„РѕСЂРјР°С‚Р° РѕС‚РІРµС‚РѕРІ.',
       tokens: 600,
       chars: 2400,
-      label: 'Системный промпт',
+      label: 'РЎРёСЃС‚РµРјРЅС‹Р№ РїСЂРѕРјРїС‚',
     });
     // 2) Walk the live message list. We deliberately include the
     //    streaming message too, so the gauge moves as Luna types.
@@ -685,7 +686,7 @@
       if (m.role === 'user') {
         text = m.raw || m.html || '';
         kind = 'user';
-        label = '👤 Ты';
+        label = 'рџ‘¤ РўС‹';
       } else if (m.role === 'assistant') {
         if (m.thinking) text += m.thinking + '\n';
         text += m.raw || m.html || '';
@@ -698,37 +699,37 @@
             content: m.thinking,
             tokens: estimateTokens(m.thinking) + 4,
             chars: m.thinking.length,
-            label: '💭 Рассуждения',
+            label: 'рџ’­ Р Р°СЃСЃСѓР¶РґРµРЅРёСЏ',
           });
         }
         if (m.kind === 'tool_use' || m.kind === 'tool_result') {
           text = (m.toolName || '') + ' ' + (m.toolArgs || '') + ' ' + (m.toolError || '');
           kind = 'tool';
-          label = '🛠 ' + (m.toolName || 'инструмент');
+          label = 'рџ›  ' + (m.toolName || 'РёРЅСЃС‚СЂСѓРјРµРЅС‚');
         } else if (m.kind === 'web_search') {
           text = (m.webQuery || '') + ' ' + (m.webResults || []).map((r) => r.title + ' ' + r.snippet).join(' ');
           kind = 'web';
-          label = '🔍 Web search';
+          label = 'рџ”Ќ Web search';
         } else if (m.kind === 'subagents') {
           text = (m.subagents || []).map((s) => s.title + ' ' + (s.result || []).map((r) => r.title + ' ' + r.snippet).join(' ')).join(' ');
           kind = 'subagent';
-          label = '🧩 Subagent';
+          label = 'рџ§© Subagent';
         } else if (m.kind === 'plan') {
           text = (m.planTitle || '') + ' ' + (m.planSteps || []).map((s) => s.title + ' ' + (s.note || '')).join(' ');
           kind = 'plan';
-          label = '📋 План';
+          label = 'рџ“‹ РџР»Р°РЅ';
         } else if (m.kind === 'file_edit' || m.kind === 'file_read') {
           text = (m.filePath || '') + ' ' + (m.fileDiff || m.fileReadContent || '');
           kind = 'file';
-          label = '📄 ' + (m.kind === 'file_edit' ? 'Правка' : 'Чтение');
+          label = 'рџ“„ ' + (m.kind === 'file_edit' ? 'РџСЂР°РІРєР°' : 'Р§С‚РµРЅРёРµ');
         } else if (m.kind === 'image') {
           // Images are converted to a flat ~800-token cost on the API side.
           kind = 'image';
-          text = '(изображение, ≈800 токенов)';
-          label = '🖼 Изображение';
+          text = '(РёР·РѕР±СЂР°Р¶РµРЅРёРµ, в‰€800 С‚РѕРєРµРЅРѕРІ)';
+          label = 'рџ–ј РР·РѕР±СЂР°Р¶РµРЅРёРµ';
         } else {
           kind = 'assistant';
-          label = '🌙 Luna';
+          label = 'рџЊ™ Luna';
         }
       }
       const tokens = kind === 'image' ? 800 : estimateTokens(text) + 4;
@@ -752,16 +753,16 @@
   // Per-kind breakdown for the summary view.
   $: contextBreakdown = (() => {
     const groups: Record<RealContextKind, { count: number; tokens: number; label: string; color: string }> = {
-      system:    { count: 0, tokens: 0, label: 'Системный',     color: 'var(--accent)' },
-      user:      { count: 0, tokens: 0, label: 'Ты',            color: 'var(--info)' },
+      system:    { count: 0, tokens: 0, label: 'РЎРёСЃС‚РµРјРЅС‹Р№',     color: 'var(--accent)' },
+      user:      { count: 0, tokens: 0, label: 'РўС‹',            color: 'var(--info)' },
       assistant: { count: 0, tokens: 0, label: 'Luna',          color: 'var(--success)' },
-      thinking:  { count: 0, tokens: 0, label: 'Рассуждения',   color: '#a882c8' },
-      tool:      { count: 0, tokens: 0, label: 'Инструменты',   color: 'var(--warn)' },
-      image:     { count: 0, tokens: 0, label: 'Изображения',   color: '#d8a8a8' },
-      web:       { count: 0, tokens: 0, label: 'Web-поиск',      color: '#6f9ce8' },
-      plan:      { count: 0, tokens: 0, label: 'Планы',          color: 'var(--code-cta)' },
-      subagent:  { count: 0, tokens: 0, label: 'Sub-агенты',     color: '#a8c97a' },
-      file:      { count: 0, tokens: 0, label: 'Файлы',         color: '#cfb37a' },
+      thinking:  { count: 0, tokens: 0, label: 'Р Р°СЃСЃСѓР¶РґРµРЅРёСЏ',   color: '#a882c8' },
+      tool:      { count: 0, tokens: 0, label: 'РРЅСЃС‚СЂСѓРјРµРЅС‚С‹',   color: 'var(--warn)' },
+      image:     { count: 0, tokens: 0, label: 'РР·РѕР±СЂР°Р¶РµРЅРёСЏ',   color: '#d8a8a8' },
+      web:       { count: 0, tokens: 0, label: 'Web-РїРѕРёСЃРє',      color: '#6f9ce8' },
+      plan:      { count: 0, tokens: 0, label: 'РџР»Р°РЅС‹',          color: 'var(--code-cta)' },
+      subagent:  { count: 0, tokens: 0, label: 'Sub-Р°РіРµРЅС‚С‹',     color: '#a8c97a' },
+      file:      { count: 0, tokens: 0, label: 'Р¤Р°Р№Р»С‹',         color: '#cfb37a' },
     };
     for (const it of realContext) {
       groups[it.kind].count += 1;
@@ -777,8 +778,8 @@
   // Estimate $ cost using rough published per-1M-token rates. We only
   // need an order of magnitude; the numbers come from MiniMax's own
   // pricing page and may drift. Keep them in one place so a price
-  // change is a one-line edit. M3 has a tiered price — the >512K
-  // context tier is 2× the ≤512K one. We pick the tier at estimate
+  // change is a one-line edit. M3 has a tiered price вЂ” the >512K
+  // context tier is 2Г— the в‰¤512K one. We pick the tier at estimate
   // time based on the in-token total.
   const COST_PER_M_TOKENS: Record<string, { in: number; out: number; inHigh?: number; outHigh?: number; highThreshold?: number }> = {
     'minimax-M3':               { in: 0.30, out: 1.20, inHigh: 0.60, outHigh: 2.40, highThreshold: 512_000 },
@@ -798,7 +799,7 @@
     // M3 (and any future tiered model) charges more once the
     // request exceeds the high-context threshold. Apply the high tier
     // on the portion above the threshold.
-    // Pre-existing bug fix: was using `rate` (undefined) — should be
+    // Pre-existing bug fix: was using `rate` (undefined) вЂ” should be
     // `tier` (the lookup result from COST_PER_M_TOKENS).
     let inRate = tier.in;
     let outRate = tier.out;
@@ -836,26 +837,26 @@
   async function copyRealContext() {
     const parts: string[] = [];
     for (const it of realContext) {
-      const header = `[${it.role.toUpperCase()}] ${it.label} ~${it.tokens} tok · ${it.chars} зн.`;
+      const header = `[${it.role.toUpperCase()}] ${it.label} ~${it.tokens} tok В· ${it.chars} Р·РЅ.`;
       parts.push(`${header}\n${it.content}`);
     }
     const full = parts.join('\n\n---\n\n');
     try {
       await navigator.clipboard.writeText(full);
-      contextCopyHint = '✓ Всё скопировано';
+      contextCopyHint = 'вњ“ Р’СЃС‘ СЃРєРѕРїРёСЂРѕРІР°РЅРѕ';
     } catch {
-      contextCopyHint = '✕ Не удалось';
+      contextCopyHint = 'вњ• РќРµ СѓРґР°Р»РѕСЃСЊ';
     }
     if (contextCopyTimer != null) clearTimeout(contextCopyTimer);
     contextCopyTimer = setTimeout(() => { contextCopyHint = ''; }, 1500);
   }
 
   // Per-item copy: stash the last-clicked id so the row can show a
-  // brief "✓" confirmation.
+  // brief "вњ“" confirmation.
   let contextItemCopied: string | null = null;
   let contextItemCopyTimer: ReturnType<typeof setTimeout> | null = null;
   async function copyContextItem(it: RealContextItem) {
-    const header = `[${it.role.toUpperCase()}] ${it.label} ~${it.tokens} tok · ${it.chars} зн.`;
+    const header = `[${it.role.toUpperCase()}] ${it.label} ~${it.tokens} tok В· ${it.chars} Р·РЅ.`;
     const text = `${header}\n${it.content}`;
     try {
       await navigator.clipboard.writeText(text);
@@ -868,7 +869,7 @@
   }
 
   // Scroll the chat to the original message and pulse-highlight it.
-  // `msgId` 0 means the system-prompt stub — there's nothing to scroll
+  // `msgId` 0 means the system-prompt stub вЂ” there's nothing to scroll
   // to, so we just briefly flash the row itself.
   let contextItemHighlight: string | null = null;
   let contextHighlightTimer: ReturnType<typeof setTimeout> | null = null;
@@ -890,8 +891,8 @@
   let streamingId: number | null = null;
   let streamToken = 0;
   // Per-request cleanup slot. Every `doChat()` replaces the array and
-  // disposes the previous listeners before subscribing again — that
-  // fixes the leak where N chat messages would leave N × 9 listeners
+  // disposes the previous listeners before subscribing again вЂ” that
+  // fixes the leak where N chat messages would leave N Г— 9 listeners
   // active at once. `onDestroy` still calls them as a safety net on
   // unmount.
   let streamUnlisten: Array<() => void> = [];
@@ -911,7 +912,7 @@
   // File-tool pill tracker: maps Rust's tool_call id to the placeholder
   // message id for `edit_file` / `create_file` tools. This MUST be shared
   // (not per-request) because the matching `ai_file_edit` event comes
-  // through `attachAgentListeners` which lives at the module level —
+  // through `attachAgentListeners` which lives at the module level вЂ”
   // it can fire after the originating `doChat` has already returned.
   const pendingFileEdits = new Map<string, number>();
 
@@ -1061,7 +1062,7 @@
 
   async function startPreview() {
     if (!currentWorkspaceInfo) {
-      previewError = 'Сначала откройте workspace';
+      previewError = 'РЎРЅР°С‡Р°Р»Р° РѕС‚РєСЂРѕР№С‚Рµ workspace';
       return;
     }
     previewBusy = true;
@@ -1087,7 +1088,7 @@
   async function openPreviewInWindow() {
     if (!previewUrl || !currentWorkspaceInfo) return;
     try {
-      await openPreviewWindow(previewUrl, `Preview — ${currentWorkspaceInfo.name}`);
+      await openPreviewWindow(previewUrl, `Preview вЂ” ${currentWorkspaceInfo.name}`);
     } catch (e) {
       showError('open_preview_window: ' + e);
     }
@@ -1124,11 +1125,11 @@
     if (npBusy) return;
     npError = '';
     if (!npName.trim()) {
-      npError = 'Введите имя проекта';
+      npError = 'Р’РІРµРґРёС‚Рµ РёРјСЏ РїСЂРѕРµРєС‚Р°';
       return;
     }
     if (!npParent.trim()) {
-      npError = 'Укажите папку';
+      npError = 'РЈРєР°Р¶РёС‚Рµ РїР°РїРєСѓ';
       return;
     }
     npBusy = true;
@@ -1199,7 +1200,7 @@
               : m
           );
         } else {
-          // No prior placeholder — create one (defensive; should not normally happen).
+          // No prior placeholder вЂ” create one (defensive; should not normally happen).
           const id = nextId++;
           messages = [
             ...messages,
@@ -1217,7 +1218,7 @@
           ];
         }
         scrollToBottom();
-        // File changed on disk — the tree may be stale; refresh.
+        // File changed on disk вЂ” the tree may be stale; refresh.
         refreshTree();
       })
     );
@@ -1270,7 +1271,7 @@
             {
               id: noteId,
               role: 'system',
-              html: '📨 from Telegram',
+              html: 'рџ“Ё from Telegram',
               createdAt: Date.now(),
             },
           ];
@@ -1353,11 +1354,11 @@
       .then((p) => {
         if (p && p.hint_text) {
           const text = [
-            '[Video Mode] На экране замечено:',
+            '[Video Mode] РќР° СЌРєСЂР°РЅРµ Р·Р°РјРµС‡РµРЅРѕ:',
             `"${p.hint_text}"`,
-            `Кадр #${p.seq}, монитор ${p.monitor_id} (${p.width}×${p.height}).`,
-            p.goal ? `Цель наблюдения: ${p.goal}` : 'Цель не задана.',
-            'Прокомментируй и предложи, что делать.',
+            `РљР°РґСЂ #${p.seq}, РјРѕРЅРёС‚РѕСЂ ${p.monitor_id} (${p.width}Г—${p.height}).`,
+            p.goal ? `Р¦РµР»СЊ РЅР°Р±Р»СЋРґРµРЅРёСЏ: ${p.goal}` : 'Р¦РµР»СЊ РЅРµ Р·Р°РґР°РЅР°.',
+            'РџСЂРѕРєРѕРјРјРµРЅС‚РёСЂСѓР№ Рё РїСЂРµРґР»РѕР¶Рё, С‡С‚Рѕ РґРµР»Р°С‚СЊ.',
           ].join(' ');
           injectUserMessage(text);
         }
@@ -1372,7 +1373,7 @@
    */
   function injectUserMessage(text: string) {
     if (busy) {
-      // The chat is mid-turn — we still append the message so the
+      // The chat is mid-turn вЂ” we still append the message so the
       // user sees it, but we don't trigger `send()` to avoid
       // interleaving turns. The user can press Enter to re-run.
     }
@@ -1450,7 +1451,7 @@
     };
 
     const tasks = [
-      // web (Google + DDG fallback + кэш 30 мин)
+      // web (Google + DDG fallback + РєСЌС€ 30 РјРёРЅ)
       (async () => {
         try {
           const items: any[] = await webSearch(q, 5);
@@ -1459,7 +1460,7 @@
             id: fuseId(),
             source: 'web' as const,
             sourceLabel: it.source || 'Web',
-            title: it.title || '(без заголовка)',
+            title: it.title || '(Р±РµР· Р·Р°РіРѕР»РѕРІРєР°)',
             snippet: (it.snippet || '').trim(),
             url: it.url || '',
             fetchedAt: it.fetched_at,
@@ -1469,7 +1470,7 @@
           return [];
         }
       })(),
-      // workspace (если открыт)
+      // workspace (РµСЃР»Рё РѕС‚РєСЂС‹С‚)
       (async () => {
         try {
           const ws = await currentWorkspace();
@@ -1482,8 +1483,8 @@
           return items.map((it) => ({
             id: fuseId(),
             source: 'workspace' as const,
-            sourceLabel: `Workspace · ${it.path?.split('/').pop() || 'file'}`,
-            title: it.path ? `${it.path}:${it.line}` : '(без имени)',
+            sourceLabel: `Workspace В· ${it.path?.split('/').pop() || 'file'}`,
+            title: it.path ? `${it.path}:${it.line}` : '(Р±РµР· РёРјРµРЅРё)',
             snippet: (it.snippet || '').trim(),
             url: '',
             line: it.line,
@@ -1503,7 +1504,7 @@
             id: fuseId(),
             source: 'news' as const,
             sourceLabel: it.source || 'News',
-            title: it.title || '(без заголовка)',
+            title: it.title || '(Р±РµР· Р·Р°РіРѕР»РѕРІРєР°)',
             snippet: (it.snippet || '').trim(),
             url: it.url || '',
             fetchedAt: it.fetched_at,
@@ -1515,11 +1516,11 @@
       })(),
     ];
 
-    // Стримим результаты по мере поступления.
+    // РЎС‚СЂРёРјРёРј СЂРµР·СѓР»СЊС‚Р°С‚С‹ РїРѕ РјРµСЂРµ РїРѕСЃС‚СѓРїР»РµРЅРёСЏ.
     await Promise.allSettled(tasks.map(async (t) => {
       const result = await t;
       if (result.length) {
-        // Дедуп по URL/path.
+        // Р”РµРґСѓРї РїРѕ URL/path.
         setTimeout(() => {
           const seen = new Set(researchAllResults.map((x) => x.url || x.path));
           const fresh = result.filter((x) => !(seen.has(x.url || x.path)));
@@ -1550,7 +1551,7 @@
   async function openFused(it: FusedItem) {
     try {
       if (it.source === 'workspace' && it.path) {
-        // emit event для Workspace.svelte — он сам откроет файл.
+        // emit event РґР»СЏ Workspace.svelte вЂ” РѕРЅ СЃР°Рј РѕС‚РєСЂРѕРµС‚ С„Р°Р№Р».
         await invoke('open_workspace' as any, { path: '' } as any).catch(() => {});
       } else if (it.url) {
         await openUrl(it.url);
@@ -1572,7 +1573,7 @@
         loading: false,
       };
     } catch (e) {
-      readMore = { url: it.url, title: it.title, text: '⚠ ' + String(e), loading: false };
+      readMore = { url: it.url, title: it.title, text: 'вљ  ' + String(e), loading: false };
     }
   }
 
@@ -1580,7 +1581,7 @@
     return src === 'web' ? 'Web' : src === 'workspace' ? 'Workspace' : 'News';
   }
   function sourceIcon(src: ResearchSource): string {
-    return src === 'web' ? '🌐' : src === 'workspace' ? '📁' : '📡';
+    return src === 'web' ? 'рџЊђ' : src === 'workspace' ? 'рџ“Ѓ' : 'рџ“Ў';
   }
   function sourceColor(src: ResearchSource): string {
     return src === 'web' ? '#6f9ce8' : src === 'workspace' ? '#c9a0a0' : '#a8c97a';
@@ -1595,7 +1596,7 @@
     news: researchAllResults.filter((x) => x.source === 'news').length,
   };
   $: anyProgress = researchProgress.some((p) => p.status === 'pending');
-  // Topical queries used when the user has no interests yet — covers
+  // Topical queries used when the user has no interests yet вЂ” covers
   // general world news so Fusion Research is never empty.
   const GLOBAL_TOPICS = ['world news', 'top stories', 'breaking news'];
   const INTERESTS_STORAGE_KEY = 'luna.user.interests';
@@ -1645,8 +1646,8 @@
   async function generateImage() {
     if (imageBusy) return;
     const prompt = imagePrompt.trim();
-    if (!prompt) { imageError = 'Введите описание картинки.'; return; }
-    if (!hasMinimax) { imageError = 'MiniMax-ключ не задан. Откройте ⚙ Settings.'; return; }
+    if (!prompt) { imageError = 'Р’РІРµРґРёС‚Рµ РѕРїРёСЃР°РЅРёРµ РєР°СЂС‚РёРЅРєРё.'; return; }
+    if (!hasMinimax) { imageError = 'MiniMax-РєР»СЋС‡ РЅРµ Р·Р°РґР°РЅ. РћС‚РєСЂРѕР№С‚Рµ вљ™ Settings.'; return; }
     imageBusy = true;
     imageError = '';
     try {
@@ -1672,7 +1673,7 @@
   }
 
   function clearAllMedia() {
-    if (!confirm(`Удалить все ${imageResults.length} картинок?`)) return;
+    if (!confirm(`РЈРґР°Р»РёС‚СЊ РІСЃРµ ${imageResults.length} РєР°СЂС‚РёРЅРѕРє?`)) return;
     imageResults = [];
     imageLightbox = null;
     persistImages();
@@ -1681,7 +1682,7 @@
   function downloadImage(card: ImageCard) {
     const a = document.createElement('a');
     a.href = card.dataUrl;
-    const safe = card.prompt.replace(/[^a-z0-9а-яё\s-]+/gi, '').trim().slice(0, 50) || 'image';
+    const safe = card.prompt.replace(/[^a-z0-9Р°-СЏС‘\s-]+/gi, '').trim().slice(0, 50) || 'image';
     a.download = `luna-${Date.now()}-${safe}.png`;
     document.body.appendChild(a);
     a.click();
@@ -1695,48 +1696,48 @@
       if (obj && typeof obj === 'object') {
         if (obj.prompt) {
           const s = String(obj.prompt);
-          const trimmed = s.length > 56 ? s.slice(0, 55) + '…' : s;
-          const aspect = obj.aspect_ratio ? ` · ${obj.aspect_ratio}` : '';
-          return `“${trimmed}”${aspect}`;
+          const trimmed = s.length > 56 ? s.slice(0, 55) + 'вЂ¦' : s;
+          const aspect = obj.aspect_ratio ? ` В· ${obj.aspect_ratio}` : '';
+          return `вЂњ${trimmed}вЂќ${aspect}`;
         }
         const firstStr = Object.values(obj).find((v) => typeof v === 'string');
         if (firstStr) {
           const s = String(firstStr);
-          return s.length > 60 ? s.slice(0, 59) + '…' : s;
+          return s.length > 60 ? s.slice(0, 59) + 'вЂ¦' : s;
         }
       }
     } catch { /* ignore */ }
-    return json.length > 60 ? json.slice(0, 59) + '…' : json;
+    return json.length > 60 ? json.slice(0, 59) + 'вЂ¦' : json;
   }
 
   // Map tool names to user-facing icons. Falls back to a generic
   // wrench when we don't recognise the call. Pairing an icon with
   // the spinner state makes "what is the agent doing right now?"
-  // answerable at a glance — no need to expand the args panel.
+  // answerable at a glance вЂ” no need to expand the args panel.
   function toolIcon(name: string | undefined): string {
     switch (name) {
-      case 'read_file':          return '📖';
-      case 'list_dir':           return '📂';
-      case 'search_workspace':   return '🔎';
-      case 'create_file':        return '📄';
-      case 'edit_file':          return '✏️';
-      case 'generate_image':     return '🎨';
-      case 'parallel_research':  return '🧠';
-      case 'parallel_generate_images': return '🖼️';
-      case 'web_search':         return '🌐';
-      case 'fetch_url':          return '🔗';
-      case 'video_observe_now':  return '📸';
-      case 'video_get_latest_frame': return '🎞️';
-      case 'video_start_capture':return '⏺';
-      case 'video_stop_capture': return '⏹';
-      case 'telegram_status':    return '🤖';
-      case 'telegram_set_token': return '🔑';
-      case 'telegram_start':     return '▶';
-      case 'telegram_stop':      return '⏹';
-      case 'update_user_interests': return '⭐';
-      case 'three_d_apply_ops':  return '🧊';
-      case 'remember':           return '💭';
-      default:                   return '🛠';
+      case 'read_file':          return 'рџ“–';
+      case 'list_dir':           return 'рџ“‚';
+      case 'search_workspace':   return 'рџ”Ћ';
+      case 'create_file':        return 'рџ“„';
+      case 'edit_file':          return 'вњЏпёЏ';
+      case 'generate_image':     return 'рџЋЁ';
+      case 'parallel_research':  return 'рџ§ ';
+      case 'parallel_generate_images': return 'рџ–јпёЏ';
+      case 'web_search':         return 'рџЊђ';
+      case 'fetch_url':          return 'рџ”—';
+      case 'video_observe_now':  return 'рџ“ё';
+      case 'video_get_latest_frame': return 'рџЋћпёЏ';
+      case 'video_start_capture':return 'вЏє';
+      case 'video_stop_capture': return 'вЏ№';
+      case 'telegram_status':    return 'рџ¤–';
+      case 'telegram_set_token': return 'рџ”‘';
+      case 'telegram_start':     return 'в–¶';
+      case 'telegram_stop':      return 'вЏ№';
+      case 'update_user_interests': return 'в­ђ';
+      case 'three_d_apply_ops':  return 'рџ§Љ';
+      case 'remember':           return 'рџ’­';
+      default:                   return 'рџ› ';
     }
   }
 
@@ -1828,7 +1829,7 @@
     setUserInterests(userInterests).catch(() => { /* non-fatal */ });
   }
 
-  // Per-source favicon background — deterministic pastel gradient from the
+  // Per-source favicon background вЂ” deterministic pastel gradient from the
   // URL so each source feels visually distinct (Perplexity-style) without
   // shipping a favicon service. Keeps the same first-letter avatar idea
   // but tints it from a per-source hue.
@@ -1882,7 +1883,7 @@
         const interest = topics[i];
         const r = settled[i];
         if (r.status !== 'fulfilled' || !r.value) continue;
-        // webSearch возвращает массив напрямую (не { results: [] }).
+        // webSearch РІРѕР·РІСЂР°С‰Р°РµС‚ РјР°СЃСЃРёРІ РЅР°РїСЂСЏРјСѓСЋ (РЅРµ { results: [] }).
         const list: Array<{ title?: string; snippet?: string; url?: string; source?: string }> =
           Array.isArray(r.value) ? r.value : (r.value as any).results || [];
         for (const item of list) {
@@ -1892,11 +1893,11 @@
           all.push({
             id: nextId++,
             interest,
-            title: item.title || '(без заголовка)',
+            title: item.title || '(Р±РµР· Р·Р°РіРѕР»РѕРІРєР°)',
             snippet: (item.snippet || '').trim(),
             url,
             source: item.source || '',
-            // webSearch не возвращает картинку — пусть будет пусто (UI уже это поддерживает).
+            // webSearch РЅРµ РІРѕР·РІСЂР°С‰Р°РµС‚ РєР°СЂС‚РёРЅРєСѓ вЂ” РїСѓСЃС‚СЊ Р±СѓРґРµС‚ РїСѓСЃС‚Рѕ (UI СѓР¶Рµ СЌС‚Рѕ РїРѕРґРґРµСЂР¶РёРІР°РµС‚).
             image: '',
             isGlobal: isFallback,
           });
@@ -1913,7 +1914,7 @@
 
   $: selectedModel = MODELS.find((m) => m.id === selectedModelId) ?? MODELS[0];
 
-  // Markdown rendering moved to src/lib/markdown.ts — imported above as
+  // Markdown rendering moved to src/lib/markdown.ts вЂ” imported above as
   // `renderMarkdown` (alias for `safeRenderMarkdown`). The old hand-rolled
   // escHtml/renderInline/renderMarkdown functions used to live here; they
   // are now superseded by a token-based parser with proper <p> paragraphs,
@@ -1924,19 +1925,19 @@
   // doesn't see "press Ctrl+Space" while looking at Code / Research / Media.
   function introForMode(m: Mode, keyPresent: boolean): string {
     if (!keyPresent) {
-      return 'Откройте вкладку ⚙ Settings и введите MiniMax-ключ, чтобы начать.';
+      return 'РћС‚РєСЂРѕР№С‚Рµ РІРєР»Р°РґРєСѓ вљ™ Settings Рё РІРІРµРґРёС‚Рµ MiniMax-РєР»СЋС‡, С‡С‚РѕР±С‹ РЅР°С‡Р°С‚СЊ.';
     }
     switch (m) {
       case 'code':
-        return 'Code mode · откройте воркспейс слева и опишите задачу — агент прочитает и отредактирует файлы.';
+        return 'Code mode В· РѕС‚РєСЂРѕР№С‚Рµ РІРѕСЂРєСЃРїРµР№СЃ СЃР»РµРІР° Рё РѕРїРёС€РёС‚Рµ Р·Р°РґР°С‡Сѓ вЂ” Р°РіРµРЅС‚ РїСЂРѕС‡РёС‚Р°РµС‚ Рё РѕС‚СЂРµРґР°РєС‚РёСЂСѓРµС‚ С„Р°Р№Р»С‹.';
       case 'research':
-        return 'Research · лента обновится автоматически по вашим интересам. Можно добавить или убрать темы в сайдбаре.';
+        return 'Research В· Р»РµРЅС‚Р° РѕР±РЅРѕРІРёС‚СЃСЏ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё РїРѕ РІР°С€РёРј РёРЅС‚РµСЂРµСЃР°Рј. РњРѕР¶РЅРѕ РґРѕР±Р°РІРёС‚СЊ РёР»Рё СѓР±СЂР°С‚СЊ С‚РµРјС‹ РІ СЃР°Р№РґР±Р°СЂРµ.';
       case 'media':
-        return 'Media · попросите агента нарисовать что-нибудь в чате — картинки появятся здесь.';
+        return 'Media В· РїРѕРїСЂРѕСЃРёС‚Рµ Р°РіРµРЅС‚Р° РЅР°СЂРёСЃРѕРІР°С‚СЊ С‡С‚Рѕ-РЅРёР±СѓРґСЊ РІ С‡Р°С‚Рµ вЂ” РєР°СЂС‚РёРЅРєРё РїРѕСЏРІСЏС‚СЃСЏ Р·РґРµСЃСЊ.';
       case 'plan':
-        return 'Plan mode · введите название и шаги плана (каждая строка — шаг). Сохраните в сайдбар или сразу запустите — агент пройдёт шаги через `create_plan` tool.';
+        return 'Plan mode В· РІРІРµРґРёС‚Рµ РЅР°Р·РІР°РЅРёРµ Рё С€Р°РіРё РїР»Р°РЅР° (РєР°Р¶РґР°СЏ СЃС‚СЂРѕРєР° вЂ” С€Р°Рі). РЎРѕС…СЂР°РЅРёС‚Рµ РІ СЃР°Р№РґР±Р°СЂ РёР»Рё СЃСЂР°Р·Сѓ Р·Р°РїСѓСЃС‚РёС‚Рµ вЂ” Р°РіРµРЅС‚ РїСЂРѕР№РґС‘С‚ С€Р°РіРё С‡РµСЂРµР· `create_plan` tool.';
       default:
-        return `MiniMax · ${selectedModel.label}. Введите сообщение или нажмите 🎙 (Ctrl+Space).`;
+        return `MiniMax В· ${selectedModel.label}. Р’РІРµРґРёС‚Рµ СЃРѕРѕР±С‰РµРЅРёРµ РёР»Рё РЅР°Р¶РјРёС‚Рµ рџЋ™ (Ctrl+Space).`;
     }
   }
 
@@ -1980,7 +1981,7 @@
     });
   }
 
-  // "Scroll to bottom" button — visible when the user is not at the bottom
+  // "Scroll to bottom" button вЂ” visible when the user is not at the bottom
   // and new content arrives (or they scrolled up manually). Click jumps to
   // the latest message, matching Perplexity / ChatGPT behavior.
   let stickToBottom = true;
@@ -2008,7 +2009,7 @@
     messages = [];
     history = [];
     researchResults = [];
-    appendMessage('system', 'Чат очищен.');
+    appendMessage('system', 'Р§Р°С‚ РѕС‡РёС‰РµРЅ.');
   }
 
   function setMode(m: Mode) {
@@ -2116,7 +2117,7 @@
   export async function runPlanFromSidebar(plan: Plan): Promise<void> {
     if (busy) return;
     if (plan.chatLinked) {
-      // The plan already ran once — the user wants to resume. We
+      // The plan already ran once вЂ” the user wants to resume. We
       // build a continue prompt and dispatch the same flow.
       pendingLinkPlanId = plan.id;
       const prompt = buildPlanContinuePrompt(plan);
@@ -2139,7 +2140,7 @@
   async function runPlanFromSidebarInternal(plan: Plan, prompt: string): Promise<void> {
     if (busy) return;
     if (!hasMinimax) {
-      showError('MiniMax-ключ не задан. Открой вкладку ⚙ Settings и введи его.');
+      showError('MiniMax-РєР»СЋС‡ РЅРµ Р·Р°РґР°РЅ. РћС‚РєСЂРѕР№ РІРєР»Р°РґРєСѓ вљ™ Settings Рё РІРІРµРґРё РµРіРѕ.');
       return;
     }
     errorBanner = '';
@@ -2204,7 +2205,7 @@
       e.stopPropagation();
       const code = copyBtn.closest('.codeblock')?.querySelector('code');
       const text = code?.textContent ?? '';
-      copyToClipboard(text, copyBtn, '⧉ Копировать', '✓ Скопировано');
+      copyToClipboard(text, copyBtn, 'в§‰ РљРѕРїРёСЂРѕРІР°С‚СЊ', 'вњ“ РЎРєРѕРїРёСЂРѕРІР°РЅРѕ');
       return;
     }
 
@@ -2216,7 +2217,7 @@
       const id = +(msgCopy.getAttribute('data-msg-id') || '0');
       const m = messages.find((mm) => mm.id === id);
       const text = m?.raw ?? m?.html ?? '';
-      copyToClipboard(text, msgCopy, '⧉', '✓');
+      copyToClipboard(text, msgCopy, 'в§‰', 'вњ“');
       return;
     }
 
@@ -2235,7 +2236,7 @@
       btn.textContent = okLabel;
       btn.classList.add('copied');
     } catch {
-      btn.textContent = '✕ Ошибка';
+      btn.textContent = 'вњ• РћС€РёР±РєР°';
     }
     setTimeout(() => {
       btn.textContent = idleLabel;
@@ -2243,7 +2244,7 @@
     }, 1500);
   }
 
-  // (removed) `refreshKeys()` — superseded by `refreshKeyStatus()` from
+  // (removed) `refreshKeys()` вЂ” superseded by `refreshKeyStatus()` from
   // the shared keyStore. App.svelte, Chat.svelte and Settings.svelte all
   // call it; the store dedupes the IPC so the keyring is hit once.
 
@@ -2267,14 +2268,14 @@
     // ---- Phase UX-1: generic aug slash resolver ----
     // Catches /memory, /video, /daimonion, /3d, /self, /browser,
     // /screen, /voice, /evolve, /thoughts, /remember, /recall, /capture
-    // — any slash keyword registered in the aug registry. The /azazel
+    // вЂ” any slash keyword registered in the aug registry. The /azazel
     // and /design branches below stay (they have side effects beyond
     // just rendering a card) but we ALSO activate the aug card here so
     // the user sees something happen immediately.
     const earlySlash = resolveSlash(text);
     if (earlySlash) {
       activateAug(earlySlash.aug, earlySlash.args, { pinned: false });
-      // Best-effort backend dispatch. Failure is non-fatal — the aug
+      // Best-effort backend dispatch. Failure is non-fatal вЂ” the aug
       // is already active client-side; the supervisor just won't
       // switch into the named persona.
       personaFireSlash(earlySlash.aug.slashCommands[0]?.replace(/^\//, '') ?? '', earlySlash.args)
@@ -2282,13 +2283,13 @@
       // For augs that have a backend run-path, fall through to the
       // specific handler below (azazelRun, mephistoChat). For augs
       // without one (memory, video, daimonion, 3d, self), we just
-      // add the user message and stop — the LLM will pick up from
+      // add the user message and stop вЂ” the LLM will pick up from
       // there.
       const hasBackend =
         earlySlash.aug.id === 'azazel' || earlySlash.aug.id === 'design';
       if (!hasBackend) {
         appendMessage('user', text);
-        // No auto-LLM follow-up for these — the user typed a slash
+        // No auto-LLM follow-up for these вЂ” the user typed a slash
         // command and expects to see the aug card. They can press
         // Enter again or type a follow-up question to engage the LLM.
         return;
@@ -2303,7 +2304,7 @@
     if (/^\/azazel\b/i.test(text)) {
       const azPrompt = text.replace(/^\/azazel\s*/i, '').trim();
       if (!azPrompt) {
-        appendMessage('user', '/azazel <prompt> — please describe what you want Azazel to do.');
+        appendMessage('user', '/azazel <prompt> вЂ” please describe what you want Azazel to do.');
         return;
       }
       try {
@@ -2311,7 +2312,7 @@
         const id = await azazelRun({ prompt: azPrompt, title: azPrompt.slice(0, 60) });
         appendMessage(
           'user',
-          `😈 Azazel task <code>${id}</code> started. Open the Azazel tab to watch.`,
+          `рџ€ Azazel task <code>${id}</code> started. Open the Azazel tab to watch.`,
         );
       } catch (e) {
         appendMessage('user', `Failed to start Azazel: ${e}`);
@@ -2342,7 +2343,7 @@
       appendMessage('user', text);
       try {
         const taskId = await mephistoChat(personaPrompt, currentChatId ?? undefined);
-        appendMessage('assistant', `🎭 Mephistopheles spawned task \`${taskId.slice(0, 8)}…\`. Open the **Design Studio** sidebar to see live results.`);
+        appendMessage('assistant', `рџЋ­ Mephistopheles spawned task \`${taskId.slice(0, 8)}вЂ¦\`. Open the **Design Studio** sidebar to see live results.`);
       } catch (e) {
         const m = (e && (e as Error).message) || String(e);
         showError(`Mephisto: ${m}`);
@@ -2358,7 +2359,7 @@
     // `doChat` will return shortly (the next `ai_done` it sees is
     // ignored because of the token bump, so the await unwinds on
     // its own when the backend's stream endpoint closes). We then
-    // start a fresh round immediately — no queueing, no waiting
+    // start a fresh round immediately вЂ” no queueing, no waiting
     // for the previous response to fully drain.
     if (busy) {
       streamToken++;
@@ -2373,7 +2374,7 @@
               ? {
                   ...m,
                   streaming: false,
-                  html: (m.html || '') + '\n\n_[прервано — новое сообщение]_',
+                  html: (m.html || '') + '\n\n_[РїСЂРµСЂРІР°РЅРѕ вЂ” РЅРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ]_',
                 }
               : m,
           );
@@ -2393,7 +2394,7 @@
     }
   }
 
-  // Pure "stop" — abandon the current stream without sending anything.
+  // Pure "stop" вЂ” abandon the current stream without sending anything.
   // Wired to the cancel button (visible only while busy).
   function cancelCurrent() {
     if (!busy) return;
@@ -2404,7 +2405,7 @@
       if (last.role === 'assistant' && last.streaming) {
         messages = messages.map((m) =>
           m.id === last.id
-            ? { ...m, streaming: false, html: (m.html || '') + '\n\n_[остановлено]_' }
+            ? { ...m, streaming: false, html: (m.html || '') + '\n\n_[РѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ]_' }
             : m,
         );
       }
@@ -2414,7 +2415,7 @@
 
   async function doChat(text: string) {
     if (!hasMinimax) {
-      throw new Error('MiniMax-ключ не задан. Открой вкладку ⚙ Settings и введи его.');
+      throw new Error('MiniMax-РєР»СЋС‡ РЅРµ Р·Р°РґР°РЅ. РћС‚РєСЂРѕР№ РІРєР»Р°РґРєСѓ вљ™ Settings Рё РІРІРµРґРё РµРіРѕ.');
     }
     history.push({ role: 'user', content: text });
     const myToken = ++streamToken;
@@ -2450,21 +2451,21 @@
     // The id of the assistant message that the current text stream is
     // writing into. Starts as the initial id; gets rotated to a fresh
     // bubble every time `ai_tool_use` fires so that the chat visually
-    // splits text → tool → text into separate cards. The `acc` string
-    // is *not* rotated — it accumulates the full reply for `history`
+    // splits text в†’ tool в†’ text into separate cards. The `acc` string
+    // is *not* rotated вЂ” it accumulates the full reply for `history`
     // so the model still sees one continuous turn.
     let currentTextId = id;
     /**
      * Commit whatever text is in `pendingText` for `currentTextId` and
      * start a fresh streaming bubble. Called when a `ai_tool_use`
      * event arrives (and at the end of the stream). Safe to call
-     * multiple times — no-ops if the current bubble is already empty.
+     * multiple times вЂ” no-ops if the current bubble is already empty.
      */
     const rotateTextBubble = () => {
       const cur = messages.find((m) => m.id === currentTextId);
       const pending = cur?.pendingText ?? '';
       if (cur) {
-        // Commit: stop streaming, render pending → html, drop pendingText.
+        // Commit: stop streaming, render pending в†’ html, drop pendingText.
         if (pending.length > 0) {
           messages = messages.map((m) =>
             m.id === currentTextId
@@ -2477,7 +2478,7 @@
               : m
           );
         } else {
-          // Empty preamble — just drop the bubble entirely so the
+          // Empty preamble вЂ” just drop the bubble entirely so the
           // chat doesn't show a stray empty card.
           messages = messages.filter((m) => m.id !== currentTextId);
         }
@@ -2505,10 +2506,10 @@
       // Strip `<think>...</think>` from the chunk. The Rust side already
       // separates reasoning_content as a separate `ai_thinking` event,
       // but some models ALSO wrap their reasoning in tags inside the
-      // content field — without this strip, the user would see the
+      // content field вЂ” without this strip, the user would see the
       // tags literally in the message body. Extracted bodies are
       // appended to the existing thinking field so they end up in
-      // the collapsible 💭 block (and the visible text stays clean).
+      // the collapsible рџ’­ block (and the visible text stays clean).
       const { text, thinking: fromTags } = stripThinkingTags(delta);
       if (text) {
         messages = messages.map((m) =>
@@ -2531,7 +2532,7 @@
       if (myToken !== streamToken || cancelled) return;
       think += delta;
       // Thinking lives on the *first* text bubble of the turn so the
-      // 💭 block stays anchored to the user-visible "preamble" rather
+      // рџ’­ block stays anchored to the user-visible "preamble" rather
       // than jumping to a post-tool bubble.
       patchMessage(id, { thinking: think });
     });
@@ -2566,11 +2567,11 @@
         }
       }
       if (acc.trim()) {
-        // History persists only the visible text — strip thinking tags.
+        // History persists only the visible text вЂ” strip thinking tags.
         const { text: cleanAcc } = stripThinkingTags(acc);
         history.push({ role: 'assistant', content: cleanAcc });
       } else {
-        patchMessage(id, { html: renderMarkdown('_(пустой ответ)_'), raw: '(пустой ответ)' });
+        patchMessage(id, { html: renderMarkdown('_(РїСѓСЃС‚РѕР№ РѕС‚РІРµС‚)_'), raw: '(РїСѓСЃС‚РѕР№ РѕС‚РІРµС‚)' });
       }
       if (streamingId === id || streamingId === currentTextId) streamingId = null;
     });
@@ -2617,7 +2618,7 @@
       const argsStr = p.args ? JSON.stringify(p.args, null, 2) : '';
       const pillId = nextId++;
 
-      // Phase UX-1: tool_use → aug activation. Any tool that has
+      // Phase UX-1: tool_use в†’ aug activation. Any tool that has
       // matching toolTriggers in the aug registry lights up the
       // corresponding sidecard. Pinned augs stay across the next
       // user message; `next_message` retention augs collapse
@@ -2640,7 +2641,7 @@
       }
 
       // Close out the current text bubble and open a fresh one so
-      // the text → tool_use → text pattern renders as visually
+      // the text в†’ tool_use в†’ text pattern renders as visually
       // distinct cards in the chat. (See `rotateTextBubble`.)
       rotateTextBubble();
 
@@ -2652,7 +2653,7 @@
 
       // For file-edit tools we eagerly create a `file_edit` placeholder
       // so the matching `ai_file_edit` event can fill the diff in. We
-      // also stash the tool_call id → message id mapping in
+      // also stash the tool_call id в†’ message id mapping in
       // `pendingFileEdits` for the same reason.
       if (p.name === 'edit_file' || p.name === 'create_file') {
         const fp = (p.args?.path as string) || '';
@@ -2706,7 +2707,7 @@
 
       // Stale-pill watchdog. If the backend never sends `ai_tool_result`
       // (e.g. stream dropped, model returned malformed tool_call, etc.)
-      // the pill would stay "работаю…" forever. After 45s we flip it
+      // the pill would stay "СЂР°Р±РѕС‚Р°СЋвЂ¦" forever. After 45s we flip it
       // to an error state and drop the id from the map so the model
       // can move on.
       const myPillId = pillId;
@@ -2717,7 +2718,7 @@
         pendingToolPills.delete(myCallId);
         messages = messages.map((mm) =>
           mm.id === myPillId
-            ? { ...mm, toolStatus: 'error', toolError: 'Таймаут: ответ от бэкенда не пришёл (45 с).' }
+            ? { ...mm, toolStatus: 'error', toolError: 'РўР°Р№РјР°СѓС‚: РѕС‚РІРµС‚ РѕС‚ Р±СЌРєРµРЅРґР° РЅРµ РїСЂРёС€С‘Р» (45 СЃ).' }
             : mm,
         );
       }, 45_000);
@@ -2902,7 +2903,7 @@
         note: p.note,
       });
       // Find the plan card this update belongs to. We track the most
-      // recent plan message — if the model opened a new plan in between,
+      // recent plan message вЂ” if the model opened a new plan in between,
       // we want the latest one to receive updates.
       let planMsgId: number | null = planByToolCall.get(p.id) ?? null;
       if (planMsgId == null) {
@@ -2928,8 +2929,8 @@
     } catch (e) {
       cancelled = true;
       patchMessage(id, {
-        html: renderMarkdown('⚠ ' + ((e as Error)?.message || e)),
-        raw: '⚠ ' + ((e as Error)?.message || e),
+        html: renderMarkdown('вљ  ' + ((e as Error)?.message || e)),
+        raw: 'вљ  ' + ((e as Error)?.message || e),
         streaming: false,
       });
       if (streamingId === id) streamingId = null;
@@ -2953,8 +2954,17 @@
 
   onMount(async () => {
     // Phase UX-1: register the chat augmentations on first mount.
-    // Idempotent — HMR can re-run onMount; the bootstrap guards itself.
+    // Idempotent вЂ” HMR can re-run onMount; the bootstrap guards itself.
     bootstrapAugmentations();
+
+  // Phase UX-2: credentials modal toggle. The modal itself is
+  // mounted at the bottom of the template; this flag is the
+  // single source of truth for visibility.
+  let showCredentials = false;
+  // Bumped after credentialList changes so the aug system can
+  // re-resolve any in-flight tool calls (mostly informational вЂ”
+  // the model only sees slot names, never values).
+  let credentialsRev = 0;
 
     // Phase UX-1: forward backend `persona:slash-fired` events into the
     // local aug system so a backend-driven slash (e.g. from the TG bot
@@ -3028,7 +3038,7 @@
         if (full && Array.isArray(full.messages) && full.messages.length > 0) {
           chatId = full.id;
           messages = full.messages as typeof messages;
-          // Skip the auto-intro below — we already have content.
+          // Skip the auto-intro below вЂ” we already have content.
           loadedFromDisk = true;
         }
       }
@@ -3085,14 +3095,14 @@
             const mb = p.downloaded != null && p.total != null
               ? `${(p.downloaded / 1024 / 1024).toFixed(0)} / ${(p.total / 1024 / 1024).toFixed(0)} MB`
               : '';
-            downloadProgress = `${p.modelId ?? '?'}: ${(p.progress ?? 0).toFixed(0)}%${mb ? ' · ' + mb : ''}`;
+            downloadProgress = `${p.modelId ?? '?'}: ${(p.progress ?? 0).toFixed(0)}%${mb ? ' В· ' + mb : ''}`;
           } else if (p.status === 'complete') {
-            downloadProgress = `${p.modelId}: ✓ готово`;
+            downloadProgress = `${p.modelId}: вњ“ РіРѕС‚РѕРІРѕ`;
             downloadPct = 100;
             autoModalOpen = false;
             refreshWhisperModels();
           } else if (p.status === 'error') {
-            downloadProgress = `${p.modelId ?? '?'}: ошибка${p.message ? ' — ' + p.message : ''}`;
+            downloadProgress = `${p.modelId ?? '?'}: РѕС€РёР±РєР°${p.message ? ' вЂ” ' + p.message : ''}`;
             downloadPct = null;
           }
         }),
@@ -3119,7 +3129,7 @@
     try {
       currentWorkspaceInfo = await currentWorkspace();
       // If nothing is open yet, auto-pick: existing recent workspace, or
-      // the process CWD. The user can override with 📂 → pick folder.
+      // the process CWD. The user can override with рџ“‚ в†’ pick folder.
       if (!currentWorkspaceInfo) {
         try {
           currentWorkspaceInfo = await defaultWorkspace();
@@ -3150,24 +3160,24 @@
     <div class="left">
       <span class="title">{providerLabel}</span>
       <span class="sub" class:ok={hasMinimax} class:miss={!hasMinimax && !checkingKeys}>
-        {checkingKeys ? '…' : hasMinimax ? `minimax · ${selectedModel.label}` : 'нет ключа'}
+        {checkingKeys ? 'вЂ¦' : hasMinimax ? `minimax В· ${selectedModel.label}` : 'РЅРµС‚ РєР»СЋС‡Р°'}
       </span>
     </div>
     <div class="middle">
-      <button class="seg" class:on={mode === 'chat'} on:click={() => setMode('chat')}>💬 Chat</button>
+      <button class="seg" class:on={mode === 'chat'} on:click={() => setMode('chat')}>рџ’¬ Chat</button>
       <button class="seg" class:on={mode === 'code'} on:click={() => setMode('code')}>
-        💻 Code{currentWorkspace ? '' : ' · no ws'}
+        рџ’» Code{currentWorkspace ? '' : ' В· no ws'}
       </button>
-      <button class="seg" class:on={mode === 'research'} on:click={() => setMode('research')}>🔬 Fusion Research</button>
+      <button class="seg" class:on={mode === 'research'} on:click={() => setMode('research')}>рџ”¬ Fusion Research</button>
       <button class="seg" class:on={mode === 'media'} on:click={() => setMode('media')}>
-        🖼 Media{#if imageResults.length > 0}<span class="seg-badge">{imageResults.length}</span>{/if}
+        рџ–ј Media{#if imageResults.length > 0}<span class="seg-badge">{imageResults.length}</span>{/if}
       </button>
       <button class="seg" class:on={mode === 'plan'} on:click={() => setMode('plan')}>
-        📋 План
+        рџ“‹ РџР»Р°РЅ
       </button>
     </div>
     <div class="right">
-      <label class="model-pick" title="Выбор модели MiniMax">
+      <label class="model-pick" title="Р’С‹Р±РѕСЂ РјРѕРґРµР»Рё MiniMax">
         <span class="model-label">model</span>
         <select bind:value={selectedModelId} on:change={onModelChange}>
           {#each MODELS as m (m.id)}
@@ -3175,14 +3185,14 @@
           {/each}
         </select>
       </label>
-      <button class="ico danger" on:click={clearChat} title="Очистить чат" aria-label="Clear">🗑</button>
+      <button class="ico danger" on:click={clearChat} title="РћС‡РёСЃС‚РёС‚СЊ С‡Р°С‚" aria-label="Clear">рџ—‘</button>
     </div>
   </header>
 
   <main class="scroll" id="chat-scroll" on:scroll={onScroll} on:click={onMessagesClick}>
     <!-- Phase UX-1: chat augmentations strip. Each AugCard is a small
          dismissible card for an active aug (memory, azazel, video,
-         design, daimonion, 3d, self). Pin 📌 survives the next user
+         design, daimonion, 3d, self). Pin рџ“Њ survives the next user
          message; otherwise the aug collapses when its retention
          policy says so. -->
     {#if activeAugsView.length > 0}
@@ -3202,36 +3212,36 @@
     {#if mode === 'code'}
       <div class="code-grid">
         <!-- LEFT: file tree -->
-        <aside class="file-tree-pane" aria-label="Файлы">
+        <aside class="file-tree-pane" aria-label="Р¤Р°Р№Р»С‹">
           <div class="ft-head">
             <div class="ft-title">
-              <span class="ft-icon">📁</span>
+              <span class="ft-icon">рџ“Ѓ</span>
               <span class="ft-name" title={currentWorkspace?.path || ''}>
                 {currentWorkspace?.name || 'no workspace'}
               </span>
             </div>
             <div class="ft-actions">
-              <button class="ft-btn" on:click={pickAndOpenWorkspace} title="Открыть папку">📂</button>
-              <button class="ft-btn" on:click={openNewProjectDialog} title="Новый проект">＋</button>
-              <button class="ft-btn" on:click={refreshTree} disabled={!currentWorkspace || workspaceLoading} title="Обновить">↻</button>
+              <button class="ft-btn" on:click={pickAndOpenWorkspace} title="РћС‚РєСЂС‹С‚СЊ РїР°РїРєСѓ">рџ“‚</button>
+              <button class="ft-btn" on:click={openNewProjectDialog} title="РќРѕРІС‹Р№ РїСЂРѕРµРєС‚">пј‹</button>
+              <button class="ft-btn" on:click={refreshTree} disabled={!currentWorkspace || workspaceLoading} title="РћР±РЅРѕРІРёС‚СЊ">в†»</button>
               {#if currentWorkspace}
-                <button class="ft-btn danger" on:click={closeCurrentWorkspace} title="Закрыть">✕</button>
+                <button class="ft-btn danger" on:click={closeCurrentWorkspace} title="Р—Р°РєСЂС‹С‚СЊ">вњ•</button>
               {/if}
             </div>
           </div>
           {#if !currentWorkspace}
             <div class="ft-empty">
-              <div class="ft-empty-h">Нет открытого workspace</div>
-              <div class="ft-empty-sub">Откройте папку с проектом или создайте новый</div>
+              <div class="ft-empty-h">РќРµС‚ РѕС‚РєСЂС‹С‚РѕРіРѕ workspace</div>
+              <div class="ft-empty-sub">РћС‚РєСЂРѕР№С‚Рµ РїР°РїРєСѓ СЃ РїСЂРѕРµРєС‚РѕРј РёР»Рё СЃРѕР·РґР°Р№С‚Рµ РЅРѕРІС‹Р№</div>
               <div class="ft-empty-actions">
-                <button class="ft-cta" on:click={pickAndOpenWorkspace}>📂 Открыть папку</button>
-                <button class="ft-cta ghost" on:click={openNewProjectDialog}>＋ Новый проект</button>
+                <button class="ft-cta" on:click={pickAndOpenWorkspace}>рџ“‚ РћС‚РєСЂС‹С‚СЊ РїР°РїРєСѓ</button>
+                <button class="ft-cta ghost" on:click={openNewProjectDialog}>пј‹ РќРѕРІС‹Р№ РїСЂРѕРµРєС‚</button>
               </div>
             </div>
           {:else}
             {#if recentWorkspaces.length > 0}
               <details class="ft-recent">
-                <summary>🕘 Recent ({recentWorkspaces.length})</summary>
+                <summary>рџ• Recent ({recentWorkspaces.length})</summary>
                 <ul class="ft-recent-list">
                   {#each recentWorkspaces as w (w.path)}
                     <li>
@@ -3246,7 +3256,7 @@
             {/if}
             <ul class="ft-list">
               {#if workspaceLoading}
-                <li class="ft-loading">Загрузка…</li>
+                <li class="ft-loading">Р—Р°РіСЂСѓР·РєР°вЂ¦</li>
               {/if}
               {#each workspaceTree as entry (entry.path)}
                 <li>
@@ -3256,7 +3266,7 @@
                     on:click={() => insertMention(entry.path)}
                     title={`Insert @${entry.path}`}
                   >
-                    <span class="ft-item-icon">{entry.kind === 'dir' ? '📁' : '📄'}</span>
+                    <span class="ft-item-icon">{entry.kind === 'dir' ? 'рџ“Ѓ' : 'рџ“„'}</span>
                     <span class="ft-item-name">{entry.path}</span>
                   </button>
                 </li>
@@ -3274,14 +3284,14 @@
               {:else}
                 {@const isUser = m.role === 'user'}
                 <div class="msg-row" class:user={isUser} class:assistant={!isUser}>
-                  <div class="msg-avatar" aria-hidden="true">{isUser ? '👤' : '🌙'}</div>
+                  <div class="msg-avatar" aria-hidden="true">{isUser ? 'рџ‘¤' : 'рџЊ™'}</div>
                   <div class="msg-col">
                     <div class="msg-head">
-                      <span class="msg-name">{isUser ? 'Ты' : 'Luna'}</span>
+                      <span class="msg-name">{isUser ? 'РўС‹' : 'Luna'}</span>
                       {#if !isUser && m.modelTag}<span class="msg-model">{m.modelTag}</span>{/if}
                       <span class="msg-time">{formatTime(m.createdAt)}</span>
                       {#if !isUser && !m.streaming}
-                        <button class="msg-copy" data-msg-id={m.id} type="button" title="Скопировать сообщение" aria-label="Скопировать сообщение">⧉</button>
+                        <button class="msg-copy" data-msg-id={m.id} type="button" title="РЎРєРѕРїРёСЂРѕРІР°С‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ" aria-label="РЎРєРѕРїРёСЂРѕРІР°С‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ">в§‰</button>
                       {/if}
                     </div>
                     <div class="msg-bubble">
@@ -3289,33 +3299,33 @@
                         {@const state = m.fileEditState || 'pending'}
                         <div class="edit-card" class:rejected={state === 'rejected'} class:accepted={state === 'accepted'}>
                           <div class="edit-card-head">
-                            <span class="edit-card-icon">{state === 'rejected' ? '↩' : (state === 'pending' ? '✎' : '✓')}</span>
+                            <span class="edit-card-icon">{state === 'rejected' ? 'в†©' : (state === 'pending' ? 'вњЋ' : 'вњ“')}</span>
                             <span class="edit-card-path" title={m.filePath}>{m.filePath}</span>
-                            <span class="edit-card-state">{state === 'pending' ? 'применено' : (state === 'rejected' ? 'откачено' : 'принято')}</span>
+                            <span class="edit-card-state">{state === 'pending' ? 'РїСЂРёРјРµРЅРµРЅРѕ' : (state === 'rejected' ? 'РѕС‚РєР°С‡РµРЅРѕ' : 'РїСЂРёРЅСЏС‚Рѕ')}</span>
                           </div>
                           {#if m.fileDiff}
                             <pre class="diff-body">{m.fileDiff}</pre>
                           {:else}
-                            <div class="edit-card-pending">применяю…</div>
+                            <div class="edit-card-pending">РїСЂРёРјРµРЅСЏСЋвЂ¦</div>
                           {/if}
                           {#if state === 'accepted'}
                             <div class="edit-card-actions">
-                              <button class="ea-btn" disabled>✓ принято</button>
-                              <button class="ea-btn reject" on:click={() => m.fileEditId && rejectFileEdit(m.fileEditId, m.id)} title="Откатить изменение и восстановить файл из бэкапа">✗ Откатить</button>
+                              <button class="ea-btn" disabled>вњ“ РїСЂРёРЅСЏС‚Рѕ</button>
+                              <button class="ea-btn reject" on:click={() => m.fileEditId && rejectFileEdit(m.fileEditId, m.id)} title="РћС‚РєР°С‚РёС‚СЊ РёР·РјРµРЅРµРЅРёРµ Рё РІРѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ С„Р°Р№Р» РёР· Р±СЌРєР°РїР°">вњ— РћС‚РєР°С‚РёС‚СЊ</button>
                             </div>
                           {:else if state === 'rejected'}
                             <div class="edit-card-actions">
-                              <span class="ea-note">Файл восстановлен из бэкапа</span>
+                              <span class="ea-note">Р¤Р°Р№Р» РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅ РёР· Р±СЌРєР°РїР°</span>
                             </div>
                           {/if}
                         </div>
                       {:else if m.kind === 'file_read'}
                         <div class="read-card">
                           <button class="read-card-head" on:click={() => toggleFileRead(m.id)}>
-                            <span class="read-card-icon">📄</span>
+                            <span class="read-card-icon">рџ“„</span>
                             <span class="read-card-path" title={m.filePath}>{m.filePath}</span>
-                            <span class="read-card-meta">{m.fileReadLines ?? 0} строк · {m.fileReadBytes ?? 0} B</span>
-                            <span class="read-card-chevron">{m.fileReadOpen ? '▾' : '▸'}</span>
+                            <span class="read-card-meta">{m.fileReadLines ?? 0} СЃС‚СЂРѕРє В· {m.fileReadBytes ?? 0} B</span>
+                            <span class="read-card-chevron">{m.fileReadOpen ? 'в–ѕ' : 'в–ё'}</span>
                           </button>
                           {#if m.fileReadOpen && m.fileReadContent}
                             <pre class="read-card-body">{m.fileReadContent}</pre>
@@ -3331,12 +3341,12 @@
             {/each}
             {#if messages.length === 0}
               <div class="empty-chat-hint">
-                <div class="ech-h">💻 Code mode</div>
-                <div class="ech-sub">Задайте задачу агенту — он прочитает, спланирует и отредактирует файлы в workspace.</div>
+                <div class="ech-h">рџ’» Code mode</div>
+                <div class="ech-sub">Р—Р°РґР°Р№С‚Рµ Р·Р°РґР°С‡Сѓ Р°РіРµРЅС‚Сѓ вЂ” РѕРЅ РїСЂРѕС‡РёС‚Р°РµС‚, СЃРїР»Р°РЅРёСЂСѓРµС‚ Рё РѕС‚СЂРµРґР°РєС‚РёСЂСѓРµС‚ С„Р°Р№Р»С‹ РІ workspace.</div>
               </div>
             {/if}
           </div>
-          <!-- Input — shared with the chat mode template below -->
+          <!-- Input вЂ” shared with the chat mode template below -->
           <div class="cc-input-wrap">
             <textarea
               bind:this={inputEl}
@@ -3345,18 +3355,18 @@
               on:input={() => { if (inputEl) detectMention(inputText, inputEl.selectionStart); }}
               on:click={() => { if (inputEl) detectMention(inputText, inputEl.selectionStart); }}
               on:keyup={() => { if (inputEl) detectMention(inputText, inputEl.selectionStart); }}
-              placeholder="Опишите задачу или @-упомяните файл…"
+              placeholder="РћРїРёС€РёС‚Рµ Р·Р°РґР°С‡Сѓ РёР»Рё @-СѓРїРѕРјСЏРЅРёС‚Рµ С„Р°Р№Р»вЂ¦"
               rows="1"
             ></textarea>
-            <button class="send" on:click={send} disabled={busy || !inputText.trim()}>↑</button>
+            <button class="send" on:click={send} disabled={busy || !inputText.trim()}>в†‘</button>
             {#if mentionOpen}
               <div class="mention-popover">
                 {#if mentionSuggestions.length === 0}
-                  <div class="mention-empty">Нет файлов</div>
+                  <div class="mention-empty">РќРµС‚ С„Р°Р№Р»РѕРІ</div>
                 {:else}
                   {#each mentionSuggestions as s, i (s.path)}
                     <button class="mention-item" on:click={() => insertMention(s.path)}>
-                      <span class="mention-icon">📄</span>
+                      <span class="mention-icon">рџ“„</span>
                       <span class="mention-path">{s.path}</span>
                     </button>
                   {/each}
@@ -3370,18 +3380,18 @@
         <aside class="preview-pane" aria-label="Preview">
           <div class="pv-head">
             <span class="pv-title">Preview</span>
-            <input class="pv-port" type="number" min="1024" max="65535" bind:value={previewPort} title="Порт" />
+            <input class="pv-port" type="number" min="1024" max="65535" bind:value={previewPort} title="РџРѕСЂС‚" />
             <button class="pv-btn primary" on:click={startPreview} disabled={!currentWorkspace || previewBusy}>
-              {previewBusy ? '…' : (previewUrl ? '↻' : '▶')}
+              {previewBusy ? 'вЂ¦' : (previewUrl ? 'в†»' : 'в–¶')}
             </button>
             {#if previewUrl}
-              <button class="pv-btn" on:click={refreshPreview} title="Reload">↻</button>
-              <button class="pv-btn" on:click={openPreviewInWindow} title="Открыть в окне">↗</button>
-              <button class="pv-btn" on:click={openPreviewInBrowser} title="Браузер">🌐</button>
+              <button class="pv-btn" on:click={refreshPreview} title="Reload">в†»</button>
+              <button class="pv-btn" on:click={openPreviewInWindow} title="РћС‚РєСЂС‹С‚СЊ РІ РѕРєРЅРµ">в†—</button>
+              <button class="pv-btn" on:click={openPreviewInBrowser} title="Р‘СЂР°СѓР·РµСЂ">рџЊђ</button>
             {/if}
           </div>
           {#if previewError}
-            <div class="pv-error">⚠ {previewError}</div>
+            <div class="pv-error">вљ  {previewError}</div>
           {/if}
           {#if previewUrl}
             <iframe
@@ -3393,27 +3403,27 @@
             ></iframe>
           {:else}
             <div class="pv-empty">
-              <div class="pv-empty-h">Нет активного preview</div>
-              <div class="pv-empty-sub">Запустите dev-сервер, чтобы увидеть приложение здесь.</div>
+              <div class="pv-empty-h">РќРµС‚ Р°РєС‚РёРІРЅРѕРіРѕ preview</div>
+              <div class="pv-empty-sub">Р—Р°РїСѓСЃС‚РёС‚Рµ dev-СЃРµСЂРІРµСЂ, С‡С‚РѕР±С‹ СѓРІРёРґРµС‚СЊ РїСЂРёР»РѕР¶РµРЅРёРµ Р·РґРµСЃСЊ.</div>
             </div>
           {/if}
         </aside>
       </div>
     {:else if mode === 'research'}
       <div class="research-view">
-        <aside class="research-sidebar" aria-label="Интересы">
+        <aside class="research-sidebar" aria-label="РРЅС‚РµСЂРµСЃС‹">
           <div class="sidebar-head">
             <div class="sidebar-title">
-              <span class="sidebar-icon">📚</span>
-              <span>Интересы</span>
+              <span class="sidebar-icon">рџ“љ</span>
+              <span>РРЅС‚РµСЂРµСЃС‹</span>
             </div>
             <span class="sidebar-count">{userInterests.length}</span>
           </div>
           <p class="sidebar-sub">
             {#if userInterests.length === 0}
-              Список пуст — покажем мировые новости. Агент заполнит его в чате, либо добавь вручную ↓
+              РЎРїРёСЃРѕРє РїСѓСЃС‚ вЂ” РїРѕРєР°Р¶РµРј РјРёСЂРѕРІС‹Рµ РЅРѕРІРѕСЃС‚Рё. РђРіРµРЅС‚ Р·Р°РїРѕР»РЅРёС‚ РµРіРѕ РІ С‡Р°С‚Рµ, Р»РёР±Рѕ РґРѕР±Р°РІСЊ РІСЂСѓС‡РЅСѓСЋ в†“
             {:else}
-              Агент сам пополняет список в чате. Можно добавить или удалить здесь.
+              РђРіРµРЅС‚ СЃР°Рј РїРѕРїРѕР»РЅСЏРµС‚ СЃРїРёСЃРѕРє РІ С‡Р°С‚Рµ. РњРѕР¶РЅРѕ РґРѕР±Р°РІРёС‚СЊ РёР»Рё СѓРґР°Р»РёС‚СЊ Р·РґРµСЃСЊ.
             {/if}
           </p>
 
@@ -3422,40 +3432,40 @@
               class="sidebar-input"
               type="text"
               bind:value={sidebarNewInterest}
-              placeholder="+ Новый интерес…"
-              aria-label="Добавить интерес"
+              placeholder="+ РќРѕРІС‹Р№ РёРЅС‚РµСЂРµСЃвЂ¦"
+              aria-label="Р”РѕР±Р°РІРёС‚СЊ РёРЅС‚РµСЂРµСЃ"
             />
-            <button class="sidebar-add-btn" type="submit" title="Добавить" aria-label="Add">＋</button>
+            <button class="sidebar-add-btn" type="submit" title="Р”РѕР±Р°РІРёС‚СЊ" aria-label="Add">пј‹</button>
           </form>
 
-          <button class="refresh-btn sidebar-refresh" on:click={fetchResearch} disabled={researchLoading} title="Обновить ленту">
-            {#if researchLoading}<span class="spinner-mini"></span>Ищу…{:else}🔄 Обновить{/if}
+          <button class="refresh-btn sidebar-refresh" on:click={fetchResearch} disabled={researchLoading} title="РћР±РЅРѕРІРёС‚СЊ Р»РµРЅС‚Сѓ">
+            {#if researchLoading}<span class="spinner-mini"></span>РС‰СѓвЂ¦{:else}рџ”„ РћР±РЅРѕРІРёС‚СЊ{/if}
           </button>
 
           <div class="sidebar-interests">
             {#if userInterests.length === 0}
-              <div class="sidebar-empty">⚠ пока пусто</div>
+              <div class="sidebar-empty">вљ  РїРѕРєР° РїСѓСЃС‚Рѕ</div>
             {/if}
             {#each userInterests as t (t)}
               <div class="sidebar-interest">
                 <span class="interest-hash">#</span>
                 <span class="interest-text" title={t}>{t}</span>
-                <button class="interest-remove" on:click={() => removeInterest(t)} title="Удалить «{t}»" aria-label="Удалить {t}">×</button>
+                <button class="interest-remove" on:click={() => removeInterest(t)} title="РЈРґР°Р»РёС‚СЊ В«{t}В»" aria-label="РЈРґР°Р»РёС‚СЊ {t}">Г—</button>
               </div>
             {/each}
           </div>
 
           {#if userInterests.length > 0}
-            <button class="sidebar-clear" on:click={clearAllInterests} title="Очистить все интересы">× Очистить все</button>
+            <button class="sidebar-clear" on:click={clearAllInterests} title="РћС‡РёСЃС‚РёС‚СЊ РІСЃРµ РёРЅС‚РµСЂРµСЃС‹">Г— РћС‡РёСЃС‚РёС‚СЊ РІСЃРµ</button>
           {/if}
 
           {#if researchCacheStats}
             <div class="cache-stats" title={researchCacheStats.path}>
-              <span class="cache-icon">📦</span>
+              <span class="cache-icon">рџ“¦</span>
               <span class="cache-text">
-                {researchCacheStats.fresh} свежих / {researchCacheStats.stale} устаревших
+                {researchCacheStats.fresh} СЃРІРµР¶РёС… / {researchCacheStats.stale} СѓСЃС‚Р°СЂРµРІС€РёС…
               </span>
-              <button class="cache-clear" on:click={clearResearchCache} title="Очистить кэш">×</button>
+              <button class="cache-clear" on:click={clearResearchCache} title="РћС‡РёСЃС‚РёС‚СЊ РєСЌС€">Г—</button>
             </div>
           {/if}
         </aside>
@@ -3463,9 +3473,9 @@
         <div class="research-feed">
           <div class="research-head">
             <div class="research-h-row">
-              <div class="research-h">🔬 Fusion Research</div>
+              <div class="research-h">рџ”¬ Fusion Research</div>
               <div class="research-sub" aria-live="polite">
-                {#if researchQuery}Запрос: <b>«{researchQuery}»</b>{:else if researchAllResults.length}Найдено {researchAllResults.length} {researchAllResults.length === 1 ? 'результат' : (researchAllResults.length < 5 ? 'результата' : 'результатов')}{:else}Поиск по web · workspace · RSS{/if}
+                {#if researchQuery}Р—Р°РїСЂРѕСЃ: <b>В«{researchQuery}В»</b>{:else if researchAllResults.length}РќР°Р№РґРµРЅРѕ {researchAllResults.length} {researchAllResults.length === 1 ? 'СЂРµР·СѓР»СЊС‚Р°С‚' : (researchAllResults.length < 5 ? 'СЂРµР·СѓР»СЊС‚Р°С‚Р°' : 'СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ')}{:else}РџРѕРёСЃРє РїРѕ web В· workspace В· RSS{/if}
               </div>
             </div>
             <form class="research-query" on:submit|preventDefault={() => runResearch(researchQuery || (userInterests[0] ?? 'AI news'))}>
@@ -3473,38 +3483,38 @@
                 class="research-input"
                 type="text"
                 bind:value={researchQuery}
-                placeholder="🔍 Что исследуем? (например: AI agents, Rust async, SpaceX)"
-                aria-label="Поисковый запрос"
+                placeholder="рџ”Ќ Р§С‚Рѕ РёСЃСЃР»РµРґСѓРµРј? (РЅР°РїСЂРёРјРµСЂ: AI agents, Rust async, SpaceX)"
+                aria-label="РџРѕРёСЃРєРѕРІС‹Р№ Р·Р°РїСЂРѕСЃ"
                 disabled={researchLoading}
               />
               <button class="research-run" type="submit" disabled={researchLoading || !researchQuery.trim()}>
-                {#if researchLoading}<span class="spinner-mini"></span>Ищу…{:else}▶ Run{/if}
+                {#if researchLoading}<span class="spinner-mini"></span>РС‰СѓвЂ¦{:else}в–¶ Run{/if}
               </button>
             </form>
 
             <div class="research-sources" role="tablist">
               <button class="src-tab" class:on={researchActiveSource === 'all'} on:click={() => (researchActiveSource = 'all')} role="tab" aria-selected={researchActiveSource === 'all'}>
-                <span>Все</span><span class="src-count">{researchAllResults.length}</span>
+                <span>Р’СЃРµ</span><span class="src-count">{researchAllResults.length}</span>
               </button>
               <button class="src-tab" class:on={researchActiveSource === 'web'} on:click={() => (researchActiveSource = 'web')} role="tab" aria-selected={researchActiveSource === 'web'}>
-                <span class="src-ico">🌐</span><span>Web</span>
+                <span class="src-ico">рџЊђ</span><span>Web</span>
                 <span class="src-count">{countBySource.web}</span>
-                <span class="src-status" data-status={researchProgress.find((p) => p.source === 'web')?.status}>●</span>
+                <span class="src-status" data-status={researchProgress.find((p) => p.source === 'web')?.status}>в—Џ</span>
               </button>
               <button class="src-tab" class:on={researchActiveSource === 'workspace'} on:click={() => (researchActiveSource = 'workspace')} role="tab" aria-selected={researchActiveSource === 'workspace'}>
-                <span class="src-ico">📁</span><span>Workspace</span>
+                <span class="src-ico">рџ“Ѓ</span><span>Workspace</span>
                 <span class="src-count">{countBySource.workspace}</span>
-                <span class="src-status" data-status={researchProgress.find((p) => p.source === 'workspace')?.status}>●</span>
+                <span class="src-status" data-status={researchProgress.find((p) => p.source === 'workspace')?.status}>в—Џ</span>
               </button>
               <button class="src-tab" class:on={researchActiveSource === 'news'} on:click={() => (researchActiveSource = 'news')} role="tab" aria="tab" aria-selected={researchActiveSource === 'news'}>
-                <span class="src-ico">📡</span><span>News</span>
+                <span class="src-ico">рџ“Ў</span><span>News</span>
                 <span class="src-count">{countBySource.news}</span>
-                <span class="src-status" data-status={researchProgress.find((p) => p.source === 'news')?.status}>●</span>
+                <span class="src-status" data-status={researchProgress.find((p) => p.source === 'news')?.status}>в—Џ</span>
               </button>
             </div>
           </div>
 
-          {#if researchError}<div class="research-banner err">⚠ {researchError}</div>{/if}
+          {#if researchError}<div class="research-banner err">вљ  {researchError}</div>{/if}
 
           <div class="research-grid">
             {#if researchLoading && researchAllResults.length === 0}
@@ -3518,9 +3528,9 @@
               {/each}
             {:else if researchAllResults.length === 0 && !researchLoading}
               <div class="r-empty">
-                <div class="r-empty-icon">🔬</div>
-                <div class="r-empty-h">Готов к исследованию</div>
-                <div class="r-empty-sub">Введи запрос выше или попробуй примеры:</div>
+                <div class="r-empty-icon">рџ”¬</div>
+                <div class="r-empty-h">Р“РѕС‚РѕРІ Рє РёСЃСЃР»РµРґРѕРІР°РЅРёСЋ</div>
+                <div class="r-empty-sub">Р’РІРµРґРё Р·Р°РїСЂРѕСЃ РІС‹С€Рµ РёР»Рё РїРѕРїСЂРѕР±СѓР№ РїСЂРёРјРµСЂС‹:</div>
                 <div class="r-empty-chips">
                   {#each ['AI agents 2026', 'Rust async runtime', 'SpaceX Starship', 'WebGPU', 'PostgreSQL 17'] as q (q)}
                     <button class="r-empty-chip" on:click={() => { researchQuery = q; runResearch(q); }}>{q}</button>
@@ -3535,7 +3545,7 @@
                     <span>{sourceIcon(r.source)}</span>
                     <span>{r.sourceLabel}</span>
                   </span>
-                  <span class="r-time">·</span>
+                  <span class="r-time">В·</span>
                 </div>
                 <h3 class="r-title">{r.title}</h3>
                 {#if r.snippet}<p class="r-snippet">{r.snippet}</p>{/if}
@@ -3548,13 +3558,13 @@
                   <span class="r-spacer"></span>
                   <div class="r-actions">
                     {#if r.url}
-                      <button class="r-action" on:click={() => readMoreUrl(r)} title="Прочитать inline" disabled={readMore?.url === r.url && readMore?.loading}>
-                        {readMore?.url === r.url && readMore?.loading ? '⏳' : '📖'} Read
+                      <button class="r-action" on:click={() => readMoreUrl(r)} title="РџСЂРѕС‡РёС‚Р°С‚СЊ inline" disabled={readMore?.url === r.url && readMore?.loading}>
+                        {readMore?.url === r.url && readMore?.loading ? 'вЏі' : 'рџ“–'} Read
                       </button>
-                      <button class="r-action" on:click={() => openFused(r)} title="Открыть в браузере">↗ Open</button>
+                      <button class="r-action" on:click={() => openFused(r)} title="РћС‚РєСЂС‹С‚СЊ РІ Р±СЂР°СѓР·РµСЂРµ">в†— Open</button>
                     {/if}
                     {#if r.source === 'workspace' && r.path}
-                      <button class="r-action primary" on:click={() => openFused(r)} title="Открыть файл">📂 Open</button>
+                      <button class="r-action primary" on:click={() => openFused(r)} title="РћС‚РєСЂС‹С‚СЊ С„Р°Р№Р»">рџ“‚ Open</button>
                     {/if}
                   </div>
                 </div>
@@ -3569,14 +3579,14 @@
           <div class="modal-card" on:click|stopPropagation role="dialog" aria-label="Read more">
             <div class="modal-head">
               <h3>{readMore.title}</h3>
-              <button class="modal-close" on:click={() => (readMore = null)} title="Закрыть" aria-label="Close">×</button>
+              <button class="modal-close" on:click={() => (readMore = null)} title="Р—Р°РєСЂС‹С‚СЊ" aria-label="Close">Г—</button>
             </div>
             <div class="modal-host">{readMore.url}</div>
             <div class="modal-body">
               {#if readMore.loading}
-                <div class="modal-loading"><span class="spinner-big"></span> Загружаю…</div>
+                <div class="modal-loading"><span class="spinner-big"></span> Р—Р°РіСЂСѓР¶Р°СЋвЂ¦</div>
               {:else}
-                <pre class="modal-text">{readMore.text || '(пусто)'}</pre>
+                <pre class="modal-text">{readMore.text || '(РїСѓСЃС‚Рѕ)'}</pre>
               {/if}
             </div>
           </div>
@@ -3586,44 +3596,44 @@
       <div class="media-view">
         <div class="media-head">
           <div>
-            <div class="media-h">🖼 Медиа</div>
+            <div class="media-h">рџ–ј РњРµРґРёР°</div>
             <div class="media-sub">
-              {imageResults.length} {imageResults.length === 1 ? 'картинка' : (imageResults.length >= 2 && imageResults.length <= 4 ? 'картинки' : 'картинок')}
-              · сгенерировано агентом через <code>generate_image</code>
+              {imageResults.length} {imageResults.length === 1 ? 'РєР°СЂС‚РёРЅРєР°' : (imageResults.length >= 2 && imageResults.length <= 4 ? 'РєР°СЂС‚РёРЅРєРё' : 'РєР°СЂС‚РёРЅРѕРє')}
+              В· СЃРіРµРЅРµСЂРёСЂРѕРІР°РЅРѕ Р°РіРµРЅС‚РѕРј С‡РµСЂРµР· <code>generate_image</code>
             </div>
           </div>
           <div class="media-actions">
-            <input class="media-search" type="text" placeholder="🔍 Поиск по промпту…" bind:value={mediaSearch} />
+            <input class="media-search" type="text" placeholder="рџ”Ќ РџРѕРёСЃРє РїРѕ РїСЂРѕРјРїС‚СѓвЂ¦" bind:value={mediaSearch} />
             {#if imageResults.length > 0}
-              <button class="media-btn danger" on:click={clearAllMedia} title="Удалить все">🗑 Очистить</button>
+              <button class="media-btn danger" on:click={clearAllMedia} title="РЈРґР°Р»РёС‚СЊ РІСЃРµ">рџ—‘ РћС‡РёСЃС‚РёС‚СЊ</button>
             {/if}
           </div>
         </div>
 
         {#if imageResults.length === 0}
           <div class="media-empty">
-            <div class="media-empty-icon">🖼</div>
-            <div class="media-empty-h">Пока пусто</div>
-            <div class="media-empty-sub">Попросите агента нарисовать что-нибудь в чате — например:<br /><em>«Нарисуй рыжего кота в скафандре на Марсе»</em></div>
+            <div class="media-empty-icon">рџ–ј</div>
+            <div class="media-empty-h">РџРѕРєР° РїСѓСЃС‚Рѕ</div>
+            <div class="media-empty-sub">РџРѕРїСЂРѕСЃРёС‚Рµ Р°РіРµРЅС‚Р° РЅР°СЂРёСЃРѕРІР°С‚СЊ С‡С‚Рѕ-РЅРёР±СѓРґСЊ РІ С‡Р°С‚Рµ вЂ” РЅР°РїСЂРёРјРµСЂ:<br /><em>В«РќР°СЂРёСЃСѓР№ СЂС‹Р¶РµРіРѕ РєРѕС‚Р° РІ СЃРєР°С„Р°РЅРґСЂРµ РЅР° РњР°СЂСЃРµВ»</em></div>
           </div>
         {:else}
           {@const q = mediaSearch.trim().toLowerCase()}
           {@const filtered = q ? imageResults.filter((it) => (it.prompt || '').toLowerCase().includes(q)) : imageResults}
           {#if filtered.length === 0}
-            <div class="media-empty"><div class="media-empty-icon">🔍</div><div class="media-empty-h">Ничего не найдено</div><div class="media-empty-sub">По запросу <em>{mediaSearch}</em> нет картинок</div></div>
+            <div class="media-empty"><div class="media-empty-icon">рџ”Ќ</div><div class="media-empty-h">РќРёС‡РµРіРѕ РЅРµ РЅР°Р№РґРµРЅРѕ</div><div class="media-empty-sub">РџРѕ Р·Р°РїСЂРѕСЃСѓ <em>{mediaSearch}</em> РЅРµС‚ РєР°СЂС‚РёРЅРѕРє</div></div>
           {:else}
             <div class="media-grid">
               {#each filtered as r (r.id)}
                 <div class="media-card">
-                  <button class="media-card-img" on:click={() => (imageLightbox = r)} title="Открыть" aria-label="Open image">
+                  <button class="media-card-img" on:click={() => (imageLightbox = r)} title="РћС‚РєСЂС‹С‚СЊ" aria-label="Open image">
                     <img src={r.dataUrl} alt={r.prompt} loading="lazy" />
                     <div class="media-card-overlay"><span class="media-card-aspect">{r.aspect}</span></div>
                   </button>
                   <div class="media-card-foot">
                     <div class="media-card-prompt">{r.prompt}</div>
                     <div class="media-card-actions">
-                      <button class="image-icon-btn" on:click={() => downloadImage(r)} title="Скачать">⤓</button>
-                      <button class="image-icon-btn danger" on:click={() => deleteImage(r.id)} title="Удалить">×</button>
+                      <button class="image-icon-btn" on:click={() => downloadImage(r)} title="РЎРєР°С‡Р°С‚СЊ">в¤“</button>
+                      <button class="image-icon-btn danger" on:click={() => deleteImage(r.id)} title="РЈРґР°Р»РёС‚СЊ">Г—</button>
                     </div>
                   </div>
                 </div>
@@ -3641,17 +3651,17 @@
           {@const prev = mIdx > 0 ? messages[mIdx - 1] : null}
           {@const prevIsTool = !!prev && !prev.role?.startsWith?.('user') && prev.kind && ['tool_use', 'tool_result', 'file_edit', 'file_read', 'image', 'image_loading', 'subagents', 'web_search', 'plan', 'video_frame'].includes(prev.kind)}
           <div class="msg-row" class:user={isUser} class:assistant={!isUser} class:post-tool={prevIsTool}>
-            <div class="msg-avatar" aria-hidden="true">{isUser ? '👤' : '🌙'}</div>
+            <div class="msg-avatar" aria-hidden="true">{isUser ? 'рџ‘¤' : 'рџЊ™'}</div>
             <div class="msg-col">
               <div class="msg-head">
-                <span class="msg-name">{isUser ? 'Ты' : 'Luna'}</span>
+                <span class="msg-name">{isUser ? 'РўС‹' : 'Luna'}</span>
                 {#if !isUser && m.modelTag}<span class="msg-model">{m.modelTag}</span>{/if}
                 <span class="msg-time">{formatTime(m.createdAt)}</span>
                 {#if m.streaming && !isUser}
-                  <span class="msg-status streaming"><span class="msg-dots"><span></span><span></span><span></span></span> печатает</span>
+                  <span class="msg-status streaming"><span class="msg-dots"><span></span><span></span><span></span></span> РїРµС‡Р°С‚Р°РµС‚</span>
                 {:else if !isUser && !m.streaming}
-                  <span class="msg-status done" title="Готово">✓</span>
-                  <button class="msg-copy" data-msg-id={m.id} type="button" title="Скопировать сообщение" aria-label="Скопировать сообщение">⧉</button>
+                  <span class="msg-status done" title="Р“РѕС‚РѕРІРѕ">вњ“</span>
+                  <button class="msg-copy" data-msg-id={m.id} type="button" title="РЎРєРѕРїРёСЂРѕРІР°С‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ" aria-label="РЎРєРѕРїРёСЂРѕРІР°С‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ">в§‰</button>
                 {/if}
               </div>
               <div class="msg-bubble-wrap">
@@ -3659,11 +3669,11 @@
                   {@const thinkingOpen = m.thinkingOpen === true || (m.thinkingOpen == null && streamingId === m.id)}
                   <div class="thinking-block" class:open={thinkingOpen}>
                     <button class="thinking-toggle" on:click={() => toggleThinking(m.id)} aria-expanded={thinkingOpen}>
-                      <span class="think-icon">💭</span>
+                      <span class="think-icon">рџ’­</span>
                       <span class="think-label">
-                        {#if streamingId === m.id}Думаю<span class="think-spinner"></span>{:else}Думала{/if}
+                        {#if streamingId === m.id}Р”СѓРјР°СЋ<span class="think-spinner"></span>{:else}Р”СѓРјР°Р»Р°{/if}
                       </span>
-                      <span class="think-chevron">{thinkingOpen ? '▾' : '▸'}</span>
+                      <span class="think-chevron">{thinkingOpen ? 'в–ѕ' : 'в–ё'}</span>
                     </button>
                     {#if thinkingOpen}<div class="think-body">{m.thinking}</div>{/if}
                   </div>
@@ -3671,14 +3681,14 @@
                 <div class="msg-bubble" class:streaming={m.streaming && m.kind !== 'image' && m.kind !== 'tool_use'}>
                 {#if m.kind === 'image' && m.imageDataUrl}
                   <div class="inline-image" style="aspect-ratio: {(m.imageAspect || '1:1').replace(':', ' / ')};">
-                    <button class="inline-image-btn" on:click={() => openLightboxForMsg(m)} title="Открыть" aria-label="Open image">
+                    <button class="inline-image-btn" on:click={() => openLightboxForMsg(m)} title="РћС‚РєСЂС‹С‚СЊ" aria-label="Open image">
                       <img src={m.imageDataUrl} alt={m.imagePrompt || ''} loading="lazy" />
                     </button>
                     <div class="inline-image-foot">
                       <div class="inline-image-prompt">{m.imagePrompt}</div>
                       <div class="inline-image-actions">
                         <span class="inline-image-aspect">{m.imageAspect}</span>
-                        <button class="image-icon-btn" on:click={() => downloadMsgImage(m)} title="Скачать">⤓</button>
+                        <button class="image-icon-btn" on:click={() => downloadMsgImage(m)} title="РЎРєР°С‡Р°С‚СЊ">в¤“</button>
                       </div>
                     </div>
                   </div>
@@ -3686,23 +3696,23 @@
                   <div class="image-loading" style="aspect-ratio: {(m.imageAspect || '1:1').replace(':', ' / ')};">
                     <div class="image-loading-shimmer"></div>
                     <div class="image-loading-meta">
-                      <span class="image-loading-icon">🎨</span>
-                      <span class="image-loading-prompt">{m.imagePrompt || 'генерирую…'}</span>
+                      <span class="image-loading-icon">рџЋЁ</span>
+                      <span class="image-loading-prompt">{m.imagePrompt || 'РіРµРЅРµСЂРёСЂСѓСЋвЂ¦'}</span>
                       <span class="image-loading-aspect">{m.imageAspect || '1:1'}</span>
                     </div>
                   </div>
                 {:else if m.kind === 'subagents'}
                   <div class="subagents">
                     <div class="subagents-head">
-                      <span class="subagents-icon">{m.subKind === 'images' ? '🎨' : '🔬'}</span>
-                      <span class="subagents-title">{m.subKind === 'images' ? 'Параллельная генерация' : 'Параллельный research'} · {m.subagents?.length ?? 0} субагентов</span>
+                      <span class="subagents-icon">{m.subKind === 'images' ? 'рџЋЁ' : 'рџ”¬'}</span>
+                      <span class="subagents-title">{m.subKind === 'images' ? 'РџР°СЂР°Р»Р»РµР»СЊРЅР°СЏ РіРµРЅРµСЂР°С†РёСЏ' : 'РџР°СЂР°Р»Р»РµР»СЊРЅС‹Р№ research'} В· {m.subagents?.length ?? 0} СЃСѓР±Р°РіРµРЅС‚РѕРІ</span>
                       {#if m.toolStatus === 'pending'}<span class="subagents-spinner"></span>{/if}
                     </div>
                     <div class="subagents-grid">
                       {#each m.subagents || [] as s (s.id)}
                         <div class="subagent-card" class:done={s.status === 'ok'} class:error={s.status === 'error'}>
                           <div class="subagent-head">
-                            <span class="subagent-status">{#if s.status === 'pending'}<span class="subagent-mini-spinner"></span>{:else if s.status === 'ok'}✓{:else}⚠{/if}</span>
+                            <span class="subagent-status">{#if s.status === 'pending'}<span class="subagent-mini-spinner"></span>{:else if s.status === 'ok'}вњ“{:else}вљ {/if}</span>
                             <span class="subagent-title">{s.title}</span>
                           </div>
                           {#if s.dataUrl}
@@ -3710,7 +3720,7 @@
                               class="subagent-img-btn"
                               style="aspect-ratio: {(s.aspect || '1:1').replace(':', ' / ')};"
                               on:click={() => openLightboxForSub(s)}
-                              title="Открыть"
+                              title="РћС‚РєСЂС‹С‚СЊ"
                               aria-label="Open image"
                             >
                               <img src={s.dataUrl} alt={s.title} loading="lazy" />
@@ -3733,7 +3743,7 @@
                   {@const inProgress = (m.planSteps || []).some((s) => s.status === 'in_progress')}
                   <div class="plan-card" class:plan-done={total > 0 && done === total} class:plan-active={inProgress}>
                     <div class="plan-head">
-                      <span class="plan-icon">{done === total && total > 0 ? '✅' : (inProgress ? '⏳' : '📋')}</span>
+                      <span class="plan-icon">{done === total && total > 0 ? 'вњ…' : (inProgress ? 'вЏі' : 'рџ“‹')}</span>
                       <span class="plan-title">{m.planTitle || 'Plan'}</span>
                       <span class="plan-counter">{done} / {total}</span>
                     </div>
@@ -3744,10 +3754,10 @@
                       {#each m.planSteps || [] as s (s.id)}
                         <li class="plan-step plan-step-{s.status}">
                           <span class="plan-step-marker" aria-hidden="true">
-                            {#if s.status === 'done'}✓{:else if s.status === 'in_progress'}⏳{:else if s.status === 'error'}⚠{:else}○{/if}
+                            {#if s.status === 'done'}вњ“{:else if s.status === 'in_progress'}вЏі{:else if s.status === 'error'}вљ {:else}в—‹{/if}
                           </span>
                           <span class="plan-step-title">{s.title}</span>
-                          {#if s.note}<span class="plan-step-note">— {s.note}</span>{/if}
+                          {#if s.note}<span class="plan-step-note">вЂ” {s.note}</span>{/if}
                         </li>
                       {/each}
                     </ol>
@@ -3758,8 +3768,8 @@
                   {#if count === 0 && m.toolStatus !== 'pending'}
                     <!-- Empty result: collapse to a single tiny pill. -->
                     <div class="web-search-empty" title={m.webQuery || ''}>
-                      <span class="web-search-icon">🌐</span>
-                      <span class="web-search-empty-text">No results for “{m.webQuery || ''}”</span>
+                      <span class="web-search-icon">рџЊђ</span>
+                      <span class="web-search-empty-text">No results for вЂњ{m.webQuery || ''}вЂќ</span>
                     </div>
                   {:else}
                     <div class="web-search" class:web-search-compact={!expanded}>
@@ -3769,12 +3779,12 @@
                         on:click={() => { messages = messages.map((mm) => mm.id === m.id ? { ...mm, webExpanded: !expanded } : mm); }}
                         aria-expanded={expanded}
                       >
-                        <span class="web-search-icon">🌐</span>
+                        <span class="web-search-icon">рџЊђ</span>
                         <span class="web-search-title">Web search</span>
-                        {#if m.webQuery}<span class="web-search-query">“{m.webQuery}”</span>{/if}
+                        {#if m.webQuery}<span class="web-search-query">вЂњ{m.webQuery}вЂќ</span>{/if}
                         <span class="web-search-count">{count} {count === 1 ? 'source' : 'sources'}</span>
                         {#if m.toolStatus === 'pending'}<span class="web-search-spinner"></span>{/if}
-                        <span class="web-search-chevron">{expanded ? '▾' : '▸'}</span>
+                        <span class="web-search-chevron">{expanded ? 'в–ѕ' : 'в–ё'}</span>
                       </button>
                       {#if expanded && count > 0}
                         <ul class="web-search-list">
@@ -3788,7 +3798,7 @@
                             </li>
                           {/each}
                           {#if count > 5}
-                            <li class="web-search-more">… ещё {count - 5} источников</li>
+                            <li class="web-search-more">вЂ¦ РµС‰С‘ {count - 5} РёСЃС‚РѕС‡РЅРёРєРѕРІ</li>
                           {/if}
                         </ul>
                       {/if}
@@ -3800,21 +3810,21 @@
                     <button class="tool-pill-head" on:click={() => { messages = messages.map((mm) => mm.id === m.id ? { ...mm, toolArgsOpen: !argsOpen } : mm); }} aria-expanded={argsOpen}>
                       <span class="tool-emoji" aria-hidden="true">{toolIcon(m.toolName)}</span>
                       <span class="tool-icon">
-                        {#if m.toolStatus === 'pending'}<span class="tool-spinner"></span>{:else if m.toolStatus === 'ok'}✓{:else if m.toolStatus === 'error'}⚠{/if}
+                        {#if m.toolStatus === 'pending'}<span class="tool-spinner"></span>{:else if m.toolStatus === 'ok'}вњ“{:else if m.toolStatus === 'error'}вљ {/if}
                       </span>
                       <span class="tool-name">{m.toolName || 'tool'}</span>
-                      {#if m.toolStatus === 'pending'}<span class="tool-status pending">работаю…</span>{/if}
+                      {#if m.toolStatus === 'pending'}<span class="tool-status pending">СЂР°Р±РѕС‚Р°СЋвЂ¦</span>{/if}
                       {#if m.toolArgs}<span class="tool-args-preview">{summarizeToolArgs(m.toolArgs)}</span>{/if}
-                      <span class="tool-chevron">{argsOpen ? '▾' : '▸'}</span>
+                      <span class="tool-chevron">{argsOpen ? 'в–ѕ' : 'в–ё'}</span>
                     </button>
                     {#if argsOpen && m.toolArgs}<pre class="tool-args">{m.toolArgs}</pre>{/if}
-                    {#if m.toolError}<div class="tool-err-text">⚠ {m.toolError}</div>{/if}
+                    {#if m.toolError}<div class="tool-err-text">вљ  {m.toolError}</div>{/if}
                   </div>
                 {:else if m.kind === 'ask_user'}
                   <div class="ask-user-card" class:answered={!!m.askAnswer}>
                     <div class="ask-user-head">
-                      <span class="ask-user-emoji" aria-hidden="true">❓</span>
-                      <span class="ask-user-label">Агент спрашивает</span>
+                      <span class="ask-user-emoji" aria-hidden="true">вќ“</span>
+                      <span class="ask-user-label">РђРіРµРЅС‚ СЃРїСЂР°С€РёРІР°РµС‚</span>
                     </div>
                     <div class="ask-user-q">{m.askQuestion}</div>
                     {#if !m.askAnswer}
@@ -3824,19 +3834,19 @@
                             type="button"
                             class="ask-option"
                             on:click={() => answerAskUser(m.id, opt)}
-                            title="Отправить как ответ"
+                            title="РћС‚РїСЂР°РІРёС‚СЊ РєР°Рє РѕС‚РІРµС‚"
                           >{opt}</button>
                         {/each}
                         <button
                           type="button"
                           class="ask-option ask-option-freetext"
                           on:click={() => focusComposerForAskUser(m.askQuestion)}
-                          title="Ответить своим текстом"
-                        >✏️ Свой ответ</button>
+                          title="РћС‚РІРµС‚РёС‚СЊ СЃРІРѕРёРј С‚РµРєСЃС‚РѕРј"
+                        >вњЏпёЏ РЎРІРѕР№ РѕС‚РІРµС‚</button>
                       </div>
                     {:else}
                       <div class="ask-user-answered">
-                        <span class="ask-user-answered-emoji" aria-hidden="true">↩</span>
+                        <span class="ask-user-answered-emoji" aria-hidden="true">в†©</span>
                         <span class="ask-user-answered-text">{m.askAnswer}</span>
                       </div>
                     {/if}
@@ -3845,33 +3855,33 @@
                   {@const state = m.fileEditState || 'pending'}
                   <div class="edit-card" class:accepted={state === 'accepted'} class:rejected={state === 'rejected'}>
                     <div class="edit-card-head">
-                      <span class="edit-card-icon">{state === 'rejected' ? '↩' : (state === 'pending' ? '✎' : '✓')}</span>
+                      <span class="edit-card-icon">{state === 'rejected' ? 'в†©' : (state === 'pending' ? 'вњЋ' : 'вњ“')}</span>
                       <span class="edit-card-path" title={m.filePath}>{m.filePath}</span>
-                      <span class="edit-card-state">{state === 'pending' ? 'применяю…' : (state === 'rejected' ? 'откачено' : 'принято')}</span>
+                      <span class="edit-card-state">{state === 'pending' ? 'РїСЂРёРјРµРЅСЏСЋвЂ¦' : (state === 'rejected' ? 'РѕС‚РєР°С‡РµРЅРѕ' : 'РїСЂРёРЅСЏС‚Рѕ')}</span>
                     </div>
                     {#if m.fileDiff}
                       <pre class="diff-body">{m.fileDiff}</pre>
                     {:else}
-                      <div class="edit-card-pending">применяю…</div>
+                      <div class="edit-card-pending">РїСЂРёРјРµРЅСЏСЋвЂ¦</div>
                     {/if}
                     {#if state === 'accepted'}
                       <div class="edit-card-actions">
-                        <button class="ea-btn" disabled>✓ принято</button>
-                        <button class="ea-btn reject" on:click={() => m.fileEditId && rejectFileEdit(m.fileEditId, m.id)} title="Откатить изменение и восстановить файл из бэкапа">✗ Откатить</button>
+                        <button class="ea-btn" disabled>вњ“ РїСЂРёРЅСЏС‚Рѕ</button>
+                        <button class="ea-btn reject" on:click={() => m.fileEditId && rejectFileEdit(m.fileEditId, m.id)} title="РћС‚РєР°С‚РёС‚СЊ РёР·РјРµРЅРµРЅРёРµ Рё РІРѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ С„Р°Р№Р» РёР· Р±СЌРєР°РїР°">вњ— РћС‚РєР°С‚РёС‚СЊ</button>
                       </div>
                     {:else if state === 'rejected'}
                       <div class="edit-card-actions">
-                        <span class="ea-note">Файл восстановлен из бэкапа</span>
+                        <span class="ea-note">Р¤Р°Р№Р» РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅ РёР· Р±СЌРєР°РїР°</span>
                       </div>
                     {/if}
                   </div>
                 {:else if m.kind === 'file_read'}
                   <div class="read-card">
                     <button class="read-card-head" on:click={() => toggleFileRead(m.id)}>
-                      <span class="read-card-icon">📄</span>
+                      <span class="read-card-icon">рџ“„</span>
                       <span class="read-card-path" title={m.filePath}>{m.filePath}</span>
-                      <span class="read-card-meta">{m.fileReadLines ?? 0} строк · {m.fileReadBytes ?? 0} B</span>
-                      <span class="read-card-chevron">{m.fileReadOpen ? '▾' : '▸'}</span>
+                      <span class="read-card-meta">{m.fileReadLines ?? 0} СЃС‚СЂРѕРє В· {m.fileReadBytes ?? 0} B</span>
+                      <span class="read-card-chevron">{m.fileReadOpen ? 'в–ѕ' : 'в–ё'}</span>
                     </button>
                     {#if m.fileReadOpen && m.fileReadContent}
                       <pre class="read-card-body">{m.fileReadContent}</pre>
@@ -3880,32 +3890,32 @@
                 {:else if m.kind === 'video_frame' && m.videoFrameUrl}
                   <div class="read-card">
                     <div class="read-card-head" style="cursor: default;">
-                      <span class="read-card-icon">🎥</span>
+                      <span class="read-card-icon">рџЋҐ</span>
                       <span class="read-card-path">
-                        {m.videoFrameKind === 'observe_now' ? 'Снимок экрана' : 'Последний кадр'}
+                        {m.videoFrameKind === 'observe_now' ? 'РЎРЅРёРјРѕРє СЌРєСЂР°РЅР°' : 'РџРѕСЃР»РµРґРЅРёР№ РєР°РґСЂ'}
                       </span>
                       <span class="read-card-meta">
-                        {m.videoFrameMeta?.width ?? '?'}×{m.videoFrameMeta?.height ?? '?'} ·
-                        {Math.round((m.videoFrameMeta?.bytes ?? 0) / 1024)} KB ·
-                        кадр #{m.videoFrameMeta?.seq ?? '?'}
+                        {m.videoFrameMeta?.width ?? '?'}Г—{m.videoFrameMeta?.height ?? '?'} В·
+                        {Math.round((m.videoFrameMeta?.bytes ?? 0) / 1024)} KB В·
+                        РєР°РґСЂ #{m.videoFrameMeta?.seq ?? '?'}
                       </span>
                     </div>
                     <img
                       class="video-frame-body"
                       src={m.videoFrameUrl}
-                      alt="Кадр экрана, просмотренный моделью"
+                      alt="РљР°РґСЂ СЌРєСЂР°РЅР°, РїСЂРѕСЃРјРѕС‚СЂРµРЅРЅС‹Р№ РјРѕРґРµР»СЊСЋ"
                     />
                   </div>
                 {:else}
                   <div class="body">{@html m.html}</div>
-                  {#if m.streaming}<span class="caret">▍</span>{/if}
+                  {#if m.streaming}<span class="caret">в–Ќ</span>{/if}
                 {/if}
                 </div>
               </div>
               {#if !isUser && !m.streaming && (m.toolCount ?? 0) > 0}
                 <div class="msg-foot">
-                  <span class="msg-tools" title="Инструменты вызванные моделью">
-                    ⌐ {m.toolCount} {m.toolCount === 1 ? 'инструмент' : (m.toolCount < 5 ? 'инструмента' : 'инструментов')}
+                  <span class="msg-tools" title="РРЅСЃС‚СЂСѓРјРµРЅС‚С‹ РІС‹Р·РІР°РЅРЅС‹Рµ РјРѕРґРµР»СЊСЋ">
+                    вЊђ {m.toolCount} {m.toolCount === 1 ? 'РёРЅСЃС‚СЂСѓРјРµРЅС‚' : (m.toolCount < 5 ? 'РёРЅСЃС‚СЂСѓРјРµРЅС‚Р°' : 'РёРЅСЃС‚СЂСѓРјРµРЅС‚РѕРІ')}
                   </span>
                 </div>
               {/if}
@@ -3923,29 +3933,29 @@
        the user gets one consistent textarea regardless of mode. -->
   {#if mode !== 'code'}
   <footer class="composer">
-    <div class="chat-history-bar" role="toolbar" aria-label="История чатов">
+    <div class="chat-history-bar" role="toolbar" aria-label="РСЃС‚РѕСЂРёСЏ С‡Р°С‚РѕРІ">
       <button
         type="button"
         class="hist-btn"
         on:click={startNewChat}
-        title="Начать новый чат (текущий будет сохранён в историю)"
-        aria-label="Начать новый чат"
+        title="РќР°С‡Р°С‚СЊ РЅРѕРІС‹Р№ С‡Р°С‚ (С‚РµРєСѓС‰РёР№ Р±СѓРґРµС‚ СЃРѕС…СЂР°РЅС‘РЅ РІ РёСЃС‚РѕСЂРёСЋ)"
+        aria-label="РќР°С‡Р°С‚СЊ РЅРѕРІС‹Р№ С‡Р°С‚"
       >
-        <span aria-hidden="true">🆕</span>
-        <span>Новый чат</span>
+        <span aria-hidden="true">рџ†•</span>
+        <span>РќРѕРІС‹Р№ С‡Р°С‚</span>
       </button>
       <button
         type="button"
         class="hist-btn danger"
         on:click={nukeAllChats}
-        title="Удалить всю историю (необратимо)"
-        aria-label="Очистить всю историю"
+        title="РЈРґР°Р»РёС‚СЊ РІСЃСЋ РёСЃС‚РѕСЂРёСЋ (РЅРµРѕР±СЂР°С‚РёРјРѕ)"
+        aria-label="РћС‡РёСЃС‚РёС‚СЊ РІСЃСЋ РёСЃС‚РѕСЂРёСЋ"
       >
-        <span aria-hidden="true">🗑</span>
-        <span>Очистить</span>
+        <span aria-hidden="true">рџ—‘</span>
+        <span>РћС‡РёСЃС‚РёС‚СЊ</span>
       </button>
       <span class="hist-status" class:saving={chatSaving} aria-live="polite">
-        {#if chatSaving}💾 Сохранение…{:else if chatId}💾 История включена{/if}
+        {#if chatSaving}рџ’ѕ РЎРѕС…СЂР°РЅРµРЅРёРµвЂ¦{:else if chatId}рџ’ѕ РСЃС‚РѕСЂРёСЏ РІРєР»СЋС‡РµРЅР°{/if}
       </span>
     </div>
     <div class="input-shell" class:focused={inputFocused} class:has-text={inputText.length > 0} class:disabled={!hasMinimax} class:multitask={multitask} class:busy={busy && mode === 'chat'}>
@@ -3958,12 +3968,12 @@
         on:focus={() => (inputFocused = true)}
         on:blur={() => (inputFocused = false)}
         placeholder={mode === 'research'
-          ? 'Research — автоподбор. Нажми ↑ или Enter для обновления…'
+          ? 'Research вЂ” Р°РІС‚РѕРїРѕРґР±РѕСЂ. РќР°Р¶РјРё в†‘ РёР»Рё Enter РґР»СЏ РѕР±РЅРѕРІР»РµРЅРёСЏвЂ¦'
           : (hasMinimax
               ? (multitask
-                  ? '⚡ Multitask: попроси сравнить темы или сгенерить несколько картинок — агент запустит субагентов параллельно…'
-                  : 'Спроси у Луны — она умеет рисовать, если попросить…')
-              : 'Сначала введи MiniMax-ключ в ⚙ Settings…')}
+                  ? 'вљЎ Multitask: РїРѕРїСЂРѕСЃРё СЃСЂР°РІРЅРёС‚СЊ С‚РµРјС‹ РёР»Рё СЃРіРµРЅРµСЂРёС‚СЊ РЅРµСЃРєРѕР»СЊРєРѕ РєР°СЂС‚РёРЅРѕРє вЂ” Р°РіРµРЅС‚ Р·Р°РїСѓСЃС‚РёС‚ СЃСѓР±Р°РіРµРЅС‚РѕРІ РїР°СЂР°Р»Р»РµР»СЊРЅРѕвЂ¦'
+                  : 'РЎРїСЂРѕСЃРё Сѓ Р›СѓРЅС‹ вЂ” РѕРЅР° СѓРјРµРµС‚ СЂРёСЃРѕРІР°С‚СЊ, РµСЃР»Рё РїРѕРїСЂРѕСЃРёС‚СЊвЂ¦')
+              : 'РЎРЅР°С‡Р°Р»Р° РІРІРµРґРё MiniMax-РєР»СЋС‡ РІ вљ™ SettingsвЂ¦')}
         rows="1"
         disabled={mode === 'chat' && !hasMinimax}
         spellcheck="true"
@@ -3976,18 +3986,21 @@
           disabled={!hasMinimax}
           on:click={toggleMultitask}
           title={multitask
-            ? 'Multitask: ON — ассистент будет использовать parallel_research / parallel_generate_images. Клик чтобы выключить.'
-            : 'Multitask: OFF — клик включит параллельный режим для следующего запроса (parallel_research, parallel_generate_images).'}
+            ? 'Multitask: ON вЂ” Р°СЃСЃРёСЃС‚РµРЅС‚ Р±СѓРґРµС‚ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ parallel_research / parallel_generate_images. РљР»РёРє С‡С‚РѕР±С‹ РІС‹РєР»СЋС‡РёС‚СЊ.'
+            : 'Multitask: OFF вЂ” РєР»РёРє РІРєР»СЋС‡РёС‚ РїР°СЂР°Р»Р»РµР»СЊРЅС‹Р№ СЂРµР¶РёРј РґР»СЏ СЃР»РµРґСѓСЋС‰РµРіРѕ Р·Р°РїСЂРѕСЃР° (parallel_research, parallel_generate_images).'}
           aria-label="Toggle multitask mode"
           aria-pressed={multitask}
         >
-          <span class="multitask-glyph" aria-hidden="true">⚡</span>
+          <span class="multitask-glyph" aria-hidden="true">вљЎ</span>
         </button>
-        <button class="icon-btn" disabled={!hasMinimax} title="Агент сам нарисует, если попросить" aria-label="Image hint" on:click={() => inputEl?.focus()}>🎨</button>
-        <button class="icon-btn" class:active={voiceState === 'recording'} class:transcribing={voiceState === 'transcribing'} class:error={voiceState === 'error'} on:click={toggleVoice} disabled={voiceState === 'transcribing' || !hasMinimax} title={voiceState === 'recording' ? 'Остановить запись (Ctrl+Space)' : 'Голосовой ввод (Ctrl+Space)'} aria-label="Toggle voice input">
-          {#if voiceState === 'recording'}<span class="rec-dot"></span>{:else if voiceState === 'transcribing'}<span class="spinner"></span>{:else}🎙{/if}
+        <button class="icon-btn" disabled={!hasMinimax} title="РђРіРµРЅС‚ СЃР°Рј РЅР°СЂРёСЃСѓРµС‚, РµСЃР»Рё РїРѕРїСЂРѕСЃРёС‚СЊ" aria-label="Image hint" on:click={() => inputEl?.focus()}>рџЋЁ</button>
+        <button class="icon-btn" class:on={showCredentials} on:click={() => (showCredentials = true)} title="Credentials вЂ” slot manager for Azazel logins" aria-label="Manage credentials">
+          рџ”‘
         </button>
-        <button class="send-btn" class:active={(mode === 'chat' ? (inputText.trim().length > 0 && hasMinimax) : (!researchLoading && userInterests.length > 0))} on:click={send} disabled={mode === 'chat' ? (!inputText.trim() || !hasMinimax) : (researchLoading || userInterests.length === 0)} title={busy && mode === 'chat' ? 'Отменить текущий ответ и отправить новое сообщение' : (mode === 'research' ? 'Обновить исследование' : 'Отправить (Enter)')} aria-label="Send">
+        <button class="icon-btn" class:active={voiceState === 'recording'} class:transcribing={voiceState === 'transcribing'} class:error={voiceState === 'error'} on:click={toggleVoice} disabled={voiceState === 'transcribing' || !hasMinimax} title={voiceState === 'recording' ? 'РћСЃС‚Р°РЅРѕРІРёС‚СЊ Р·Р°РїРёСЃСЊ (Ctrl+Space)' : 'Р“РѕР»РѕСЃРѕРІРѕР№ РІРІРѕРґ (Ctrl+Space)'} aria-label="Toggle voice input">
+          {#if voiceState === 'recording'}<span class="rec-dot"></span>{:else if voiceState === 'transcribing'}<span class="spinner"></span>{:else}рџЋ™{/if}
+        </button>
+        <button class="send-btn" class:active={(mode === 'chat' ? (inputText.trim().length > 0 && hasMinimax) : (!researchLoading && userInterests.length > 0))} on:click={send} disabled={mode === 'chat' ? (!inputText.trim() || !hasMinimax) : (researchLoading || userInterests.length === 0)} title={busy && mode === 'chat' ? 'РћС‚РјРµРЅРёС‚СЊ С‚РµРєСѓС‰РёР№ РѕС‚РІРµС‚ Рё РѕС‚РїСЂР°РІРёС‚СЊ РЅРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ' : (mode === 'research' ? 'РћР±РЅРѕРІРёС‚СЊ РёСЃСЃР»РµРґРѕРІР°РЅРёРµ' : 'РћС‚РїСЂР°РІРёС‚СЊ (Enter)')} aria-label="Send">
           {#if busy && mode === 'chat'}
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>
           {:else}
@@ -3997,15 +4010,15 @@
       </div>
     </div>
     <div class="hint" class:focused={inputFocused}>
-      {#if voiceError}<span class="voice-err">🎙 {voiceError}</span>{/if}
+      {#if voiceError}<span class="voice-err">рџЋ™ {voiceError}</span>{/if}
       {#if multitask}
         <button
           type="button"
           class="hint-pill multitask-pill"
           on:click={toggleMultitask}
-          title="Multitask включён — клик чтобы выключить"
+          title="Multitask РІРєР»СЋС‡С‘РЅ вЂ” РєР»РёРє С‡С‚РѕР±С‹ РІС‹РєР»СЋС‡РёС‚СЊ"
           aria-label="Disable multitask mode"
-        >⚡ Multitask</button>
+        >вљЎ Multitask</button>
       {/if}
       <span class="hint-pill model-pill">MiniMax</span>
       <span class="hint-pill model-pill">{selectedModel.label}</span>
@@ -4014,12 +4027,12 @@
           type="button"
           class="busy-pill"
           on:click={cancelCurrent}
-          title="Остановить текущий ответ (или просто нажми Enter с новым сообщением)"
-          aria-label="Остановить ответ"
+          title="РћСЃС‚Р°РЅРѕРІРёС‚СЊ С‚РµРєСѓС‰РёР№ РѕС‚РІРµС‚ (РёР»Рё РїСЂРѕСЃС‚Рѕ РЅР°Р¶РјРё Enter СЃ РЅРѕРІС‹Рј СЃРѕРѕР±С‰РµРЅРёРµРј)"
+          aria-label="РћСЃС‚Р°РЅРѕРІРёС‚СЊ РѕС‚РІРµС‚"
         >
           <span class="busy-spinner" aria-hidden="true"></span>
-          <span>печатает…</span>
-          <span class="busy-stop" aria-hidden="true">✕</span>
+          <span>РїРµС‡Р°С‚Р°РµС‚вЂ¦</span>
+          <span class="busy-stop" aria-hidden="true">вњ•</span>
         </button>
       {/if}
       <span class="context-wrap">
@@ -4028,7 +4041,7 @@
           class="context-btn {contextBucket(contextInfo.pct)}"
           bind:this={contextBtnEl}
           on:click|stopPropagation={toggleContextPopover}
-          title="Контекст: {formatTokens(contextInfo.used)} / {formatTokens(contextInfo.window)} токенов — клик покажет подробности"
+          title="РљРѕРЅС‚РµРєСЃС‚: {formatTokens(contextInfo.used)} / {formatTokens(contextInfo.window)} С‚РѕРєРµРЅРѕРІ вЂ” РєР»РёРє РїРѕРєР°Р¶РµС‚ РїРѕРґСЂРѕР±РЅРѕСЃС‚Рё"
           aria-haspopup="true"
           aria-expanded={contextPopover}
         >
@@ -4050,7 +4063,7 @@
           on:mousedown|stopPropagation
         >
           <div class="context-pop-head">
-            <span class="context-pop-title">Контекст</span>
+            <span class="context-pop-title">РљРѕРЅС‚РµРєСЃС‚</span>
             <span class="context-pop-model">{selectedModel.label}</span>
           </div>
           <div class="context-tabs" role="tablist">
@@ -4061,7 +4074,7 @@
               class="context-tab"
               class:active={contextView === 'summary'}
               on:click={() => (contextView = 'summary')}
-            >📊 Сводка</button>
+            >рџ“Љ РЎРІРѕРґРєР°</button>
             <button
               type="button"
               role="tab"
@@ -4069,8 +4082,8 @@
               class="context-tab"
               class:active={contextView === 'content'}
               on:click={() => (contextView = 'content')}
-              title="Показать то, что реально уходит в модель"
-            >📝 Содержимое <span class="context-tab-count">{realContext.length}</span></button>
+              title="РџРѕРєР°Р·Р°С‚СЊ С‚Рѕ, С‡С‚Рѕ СЂРµР°Р»СЊРЅРѕ СѓС…РѕРґРёС‚ РІ РјРѕРґРµР»СЊ"
+            >рџ“ќ РЎРѕРґРµСЂР¶РёРјРѕРµ <span class="context-tab-count">{realContext.length}</span></button>
           </div>
           {#if contextView === 'summary'}
             <div class="context-bar-row">
@@ -4080,17 +4093,17 @@
               <span class="context-bar-pct">{contextInfo.pct}%</span>
             </div>
             <div class="context-numbers">
-              <span><b>{formatTokens(contextInfo.used)}</b> использовано</span>
+              <span><b>{formatTokens(contextInfo.used)}</b> РёСЃРїРѕР»СЊР·РѕРІР°РЅРѕ</span>
               <span class="context-numbers-sep">/</span>
-              <span><b>{formatTokens(contextInfo.window)}</b> окно</span>
-              <span class="context-numbers-sep">·</span>
-              <span class="context-remaining">осталось <b>{formatTokens(Math.max(0, contextInfo.window - contextInfo.used))}</b></span>
+              <span><b>{formatTokens(contextInfo.window)}</b> РѕРєРЅРѕ</span>
+              <span class="context-numbers-sep">В·</span>
+              <span class="context-remaining">РѕСЃС‚Р°Р»РѕСЃСЊ <b>{formatTokens(Math.max(0, contextInfo.window - contextInfo.used))}</b></span>
             </div>
 
-            <div class="context-bd-title">По типам</div>
+            <div class="context-bd-title">РџРѕ С‚РёРїР°Рј</div>
             <div class="context-bd-list">
               {#each contextBreakdown as g (g.kind)}
-                <div class="context-bd-row" title="{g.count} блок(ов) · {g.tokens} tok">
+                <div class="context-bd-row" title="{g.count} Р±Р»РѕРє(РѕРІ) В· {g.tokens} tok">
                   <span class="context-bd-dot" style="background: {g.color}"></span>
                   <span class="context-bd-label">{g.label}</span>
                   <span class="context-bd-mini">
@@ -4102,15 +4115,15 @@
               {/each}
             </div>
 
-            <div class="context-cost" title="Оценка по публичным тарифам MiniMax; выход считается только по последним ответам ассистента">
-              <span class="context-cost-label">≈ ${costEstimate.total.toFixed(4)}</span>
-              <span class="context-cost-sep">·</span>
+            <div class="context-cost" title="РћС†РµРЅРєР° РїРѕ РїСѓР±Р»РёС‡РЅС‹Рј С‚Р°СЂРёС„Р°Рј MiniMax; РІС‹С…РѕРґ СЃС‡РёС‚Р°РµС‚СЃСЏ С‚РѕР»СЊРєРѕ РїРѕ РїРѕСЃР»РµРґРЅРёРј РѕС‚РІРµС‚Р°Рј Р°СЃСЃРёСЃС‚РµРЅС‚Р°">
+              <span class="context-cost-label">в‰€ ${costEstimate.total.toFixed(4)}</span>
+              <span class="context-cost-sep">В·</span>
               <span class="context-cost-sub">in ${costEstimate.in.toFixed(4)}</span>
-              <span class="context-cost-sep">·</span>
+              <span class="context-cost-sep">В·</span>
               <span class="context-cost-sub">out ${costEstimate.out.toFixed(4)}</span>
             </div>
 
-            <div class="context-bd-title">Последние сообщения</div>
+            <div class="context-bd-title">РџРѕСЃР»РµРґРЅРёРµ СЃРѕРѕР±С‰РµРЅРёСЏ</div>
             <div class="context-breakdown">
               {#each contextInfo.perMessage.slice(-6).reverse() as bm (bm.id)}
                 <div class="context-row" title={bm.preview}>
@@ -4120,24 +4133,24 @@
                 </div>
               {/each}
               {#if contextInfo.perMessage.length > 6}
-                <div class="context-row context-row-more">… ещё {contextInfo.perMessage.length - 6}</div>
+                <div class="context-row context-row-more">вЂ¦ РµС‰С‘ {contextInfo.perMessage.length - 6}</div>
               {/if}
             </div>
           {:else}
             <div class="context-content">
               <div class="context-content-meta">
-                <span><b>{realContext.length}</b> блок(ов)</span>
-                <span class="context-content-meta-sep">·</span>
-                <span>~<b>{formatTokens(realContext.reduce((s, it) => s + it.tokens, 0))}</b> токенов</span>
+                <span><b>{realContext.length}</b> Р±Р»РѕРє(РѕРІ)</span>
+                <span class="context-content-meta-sep">В·</span>
+                <span>~<b>{formatTokens(realContext.reduce((s, it) => s + it.tokens, 0))}</b> С‚РѕРєРµРЅРѕРІ</span>
                 <span class="context-content-spacer"></span>
                 <button
                   type="button"
                   class="context-copy"
-                  class:ok={contextCopyHint.startsWith('✓')}
-                  class:err={contextCopyHint.startsWith('✕')}
+                  class:ok={contextCopyHint.startsWith('вњ“')}
+                  class:err={contextCopyHint.startsWith('вњ•')}
                   on:click={copyRealContext}
-                  title="Скопировать весь видимый контекст в буфер обмена"
-                >{contextCopyHint || '📋 Всё'}</button>
+                  title="РЎРєРѕРїРёСЂРѕРІР°С‚СЊ РІРµСЃСЊ РІРёРґРёРјС‹Р№ РєРѕРЅС‚РµРєСЃС‚ РІ Р±СѓС„РµСЂ РѕР±РјРµРЅР°"
+                >{contextCopyHint || 'рџ“‹ Р’СЃС‘'}</button>
               </div>
               <div class="context-content-list">
                 {#each realContext as it (it.id)}
@@ -4149,62 +4162,62 @@
                     role="button"
                     tabindex="0"
                     on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); jumpToContextItem(it); } }}
-                    title="Клик — прыгнуть к сообщению в чате"
+                    title="РљР»РёРє вЂ” РїСЂС‹РіРЅСѓС‚СЊ Рє СЃРѕРѕР±С‰РµРЅРёСЋ РІ С‡Р°С‚Рµ"
                   >
                     <div class="context-content-head">
                       <span class="context-row-role {it.role}">{it.label}</span>
                       <span class="context-content-tokens">~{formatTokens(it.tokens)} tok</span>
-                      <span class="context-content-chars">{it.chars} зн.</span>
+                      <span class="context-content-chars">{it.chars} Р·РЅ.</span>
                       <span class="context-content-spacer"></span>
                       <button
                         type="button"
                         class="context-item-copy"
                         class:ok={contextItemCopied === it.id}
                         on:click|stopPropagation={() => copyContextItem(it)}
-                        title="Скопировать этот блок"
-                        aria-label="Скопировать"
-                      >{contextItemCopied === it.id ? '✓' : '⧉'}</button>
+                        title="РЎРєРѕРїРёСЂРѕРІР°С‚СЊ СЌС‚РѕС‚ Р±Р»РѕРє"
+                        aria-label="РЎРєРѕРїРёСЂРѕРІР°С‚СЊ"
+                      >{contextItemCopied === it.id ? 'вњ“' : 'в§‰'}</button>
                     </div>
                     <pre class="context-content-text">{it.content}</pre>
                   </div>
                 {/each}
                 {#if realContext.length === 0}
-                  <div class="context-content-empty">Контекст пуст — отправьте первое сообщение, и здесь появится его полный текст.</div>
+                  <div class="context-content-empty">РљРѕРЅС‚РµРєСЃС‚ РїСѓСЃС‚ вЂ” РѕС‚РїСЂР°РІСЊС‚Рµ РїРµСЂРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ, Рё Р·РґРµСЃСЊ РїРѕСЏРІРёС‚СЃСЏ РµРіРѕ РїРѕР»РЅС‹Р№ С‚РµРєСЃС‚.</div>
                 {/if}
               </div>
-              <div class="context-content-foot">Клик по блоку — прокрутка к сообщению в чате. <kbd>⧉</kbd> копирует один блок, «📋 Всё» — весь контекст. Системный промпт формируется в Rust, его размер показан приблизительно (≈600 токенов).</div>
+              <div class="context-content-foot">РљР»РёРє РїРѕ Р±Р»РѕРєСѓ вЂ” РїСЂРѕРєСЂСѓС‚РєР° Рє СЃРѕРѕР±С‰РµРЅРёСЋ РІ С‡Р°С‚Рµ. <kbd>в§‰</kbd> РєРѕРїРёСЂСѓРµС‚ РѕРґРёРЅ Р±Р»РѕРє, В«рџ“‹ Р’СЃС‘В» вЂ” РІРµСЃСЊ РєРѕРЅС‚РµРєСЃС‚. РЎРёСЃС‚РµРјРЅС‹Р№ РїСЂРѕРјРїС‚ С„РѕСЂРјРёСЂСѓРµС‚СЃСЏ РІ Rust, РµРіРѕ СЂР°Р·РјРµСЂ РїРѕРєР°Р·Р°РЅ РїСЂРёР±Р»РёР·РёС‚РµР»СЊРЅРѕ (в‰€600 С‚РѕРєРµРЅРѕРІ).</div>
             </div>
           {/if}
           <div class="context-pop-actions">
-            <button class="context-action primary" on:click={() => { contextPopover = false; startNewChat(); }} title="Начать новый чат (текущий сохранится в историю)" type="button">🆕 Новый чат</button>
-            <button class="context-action" on:click={clearContext} title="Очистить контекст в текущем чате" type="button">↺ Очистить</button>
-            <span class="context-hint">Esc — закрыть · оценка приблизительная</span>
+            <button class="context-action primary" on:click={() => { contextPopover = false; startNewChat(); }} title="РќР°С‡Р°С‚СЊ РЅРѕРІС‹Р№ С‡Р°С‚ (С‚РµРєСѓС‰РёР№ СЃРѕС…СЂР°РЅРёС‚СЃСЏ РІ РёСЃС‚РѕСЂРёСЋ)" type="button">рџ†• РќРѕРІС‹Р№ С‡Р°С‚</button>
+            <button class="context-action" on:click={clearContext} title="РћС‡РёСЃС‚РёС‚СЊ РєРѕРЅС‚РµРєСЃС‚ РІ С‚РµРєСѓС‰РµРј С‡Р°С‚Рµ" type="button">в†є РћС‡РёСЃС‚РёС‚СЊ</button>
+            <span class="context-hint">Esc вЂ” Р·Р°РєСЂС‹С‚СЊ В· РѕС†РµРЅРєР° РїСЂРёР±Р»РёР·РёС‚РµР»СЊРЅР°СЏ</span>
           </div>
         </div>
       {/if}
       </span>
       <span class="hint-spacer"></span>
       <span class="hint-keys">
-        <kbd>Enter</kbd> отправить
+        <kbd>Enter</kbd> РѕС‚РїСЂР°РІРёС‚СЊ
         {#if busy && mode === 'chat'}
-          <span class="hint-sep">·</span>
-          <span class="hint-steer">Enter во время ответа — отменит и пошлёт новое</span>
+          <span class="hint-sep">В·</span>
+          <span class="hint-steer">Enter РІРѕ РІСЂРµРјСЏ РѕС‚РІРµС‚Р° вЂ” РѕС‚РјРµРЅРёС‚ Рё РїРѕС€Р»С‘С‚ РЅРѕРІРѕРµ</span>
         {:else}
-          <span class="hint-sep">·</span>
-          <kbd>Shift</kbd>+<kbd>Enter</kbd> перенос
+          <span class="hint-sep">В·</span>
+          <kbd>Shift</kbd>+<kbd>Enter</kbd> РїРµСЂРµРЅРѕСЃ
         {/if}
       </span>
     </div>
 
-    <!-- Floating "scroll to bottom" button — appears when user scrolls up. -->
+    <!-- Floating "scroll to bottom" button вЂ” appears when user scrolls up. -->
     {#if !stickToBottom && (mode === 'chat' || mode === 'media')}
-      <button class="scroll-bottom" on:click={jumpToBottom} title="К последнему сообщению" aria-label="Scroll to bottom">
-        ↓
+      <button class="scroll-bottom" on:click={jumpToBottom} title="Рљ РїРѕСЃР»РµРґРЅРµРјСѓ СЃРѕРѕР±С‰РµРЅРёСЋ" aria-label="Scroll to bottom">
+        в†“
       </button>
     {/if}
 
     <div class="voice-bar">
-      <button class="model-chip" class:warn={!activeModelId} on:click={() => (modelPanelOpen = !modelPanelOpen)} title={modelsDir ? `Whisper model\n${modelsDir}` : 'Whisper model'}>🎙 {activeModelId ? activeModelId : 'no model'}</button>
+      <button class="model-chip" class:warn={!activeModelId} on:click={() => (modelPanelOpen = !modelPanelOpen)} title={modelsDir ? `Whisper model\n${modelsDir}` : 'Whisper model'}>рџЋ™ {activeModelId ? activeModelId : 'no model'}</button>
       {#if downloadProgress}<span class="download-info" class:done={downloadPct === 100}>{downloadProgress}</span>{/if}
     </div>
   </footer>
@@ -4221,7 +4234,7 @@
           type="text"
           bind:value={planTitle}
           bind:this={planTitleInputEl}
-          placeholder="Название плана (например: «Рефакторинг авторизации»)"
+          placeholder="РќР°Р·РІР°РЅРёРµ РїР»Р°РЅР° (РЅР°РїСЂРёРјРµСЂ: В«Р РµС„Р°РєС‚РѕСЂРёРЅРі Р°РІС‚РѕСЂРёР·Р°С†РёРёВ»)"
           on:keydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); planStepsInputEl?.focus(); } }}
         />
         <textarea
@@ -4229,16 +4242,16 @@
           bind:value={planStepsText}
           bind:this={planStepsInputEl}
           rows="6"
-          placeholder={'1. первый шаг\n2. второй шаг\n3. третий шаг'}
+          placeholder={'1. РїРµСЂРІС‹Р№ С€Р°Рі\n2. РІС‚РѕСЂРѕР№ С€Р°Рі\n3. С‚СЂРµС‚РёР№ С€Р°Рі'}
           spellcheck="false"
           on:keydown={onPlanStepsKeydown}
         ></textarea>
         <div class="plan-form-bar">
           <span class="plan-hint">
             {#if busy}
-              ⏳ Агент работает — кнопки заблокированы
+              вЏі РђРіРµРЅС‚ СЂР°Р±РѕС‚Р°РµС‚ вЂ” РєРЅРѕРїРєРё Р·Р°Р±Р»РѕРєРёСЂРѕРІР°РЅС‹
             {:else}
-              Enter — новый шаг · Shift+Enter — перенос
+              Enter вЂ” РЅРѕРІС‹Р№ С€Р°Рі В· Shift+Enter вЂ” РїРµСЂРµРЅРѕСЃ
             {/if}
           </span>
           <div class="plan-buttons">
@@ -4247,15 +4260,15 @@
               class="plan-save-btn"
               on:click={savePlan}
               disabled={!canSavePlan}
-              title="Сохранить план в сайдбар (без отправки агенту)"
-            >Сохранить план</button>
+              title="РЎРѕС…СЂР°РЅРёС‚СЊ РїР»Р°РЅ РІ СЃР°Р№РґР±Р°СЂ (Р±РµР· РѕС‚РїСЂР°РІРєРё Р°РіРµРЅС‚Сѓ)"
+            >РЎРѕС…СЂР°РЅРёС‚СЊ РїР»Р°РЅ</button>
             <button
               type="button"
               class="plan-run-btn"
               on:click={runPlan}
               disabled={!canRunPlan || busy}
-              title={busy ? 'Дождитесь завершения текущего ответа' : 'Сохранить и отправить агенту'}
-            >▶ Запустить</button>
+              title={busy ? 'Р”РѕР¶РґРёС‚РµСЃСЊ Р·Р°РІРµСЂС€РµРЅРёСЏ С‚РµРєСѓС‰РµРіРѕ РѕС‚РІРµС‚Р°' : 'РЎРѕС…СЂР°РЅРёС‚СЊ Рё РѕС‚РїСЂР°РІРёС‚СЊ Р°РіРµРЅС‚Сѓ'}
+            >в–¶ Р—Р°РїСѓСЃС‚РёС‚СЊ</button>
           </div>
         </div>
       </div>
@@ -4267,9 +4280,9 @@
     <div class="model-panel" role="dialog" aria-label="Whisper models">
       <div class="model-panel-head">
         <strong>Whisper models</strong>
-        <button class="link" on:click={() => (modelPanelOpen = false)}>×</button>
+        <button class="link" on:click={() => (modelPanelOpen = false)}>Г—</button>
       </div>
-      <p class="muted">Хранятся в <code>%APPDATA%\com.luna.agent\whisper-models\</code> (≈ AppData на macOS/Linux).</p>
+      <p class="muted">РҐСЂР°РЅСЏС‚СЃСЏ РІ <code>%APPDATA%\com.luna.agent\whisper-models\</code> (в‰€ AppData РЅР° macOS/Linux).</p>
       <ul>
         {#each whisperModels as m}
           <li class:active-model={m.active} class:installing={installingId === m.id}>
@@ -4281,7 +4294,7 @@
             <div class="model-action">
               {#if m.active}<span class="badge">active</span>
               {:else if m.installed}<button class="secondary" on:click={() => setActiveWhisperModel(m.id)}>Use</button>
-              {:else if m.fitsInMemory}<button class="primary" disabled={installingId !== null} on:click={() => installWhisperModel(m.id)}>{#if installingId === m.id}Installing…{:else}Install{/if}</button>
+              {:else if m.fitsInMemory}<button class="primary" disabled={installingId !== null} on:click={() => installWhisperModel(m.id)}>{#if installingId === m.id}InstallingвЂ¦{:else}Install{/if}</button>
               {:else}<span class="muted">needs {m.requiredMemoryMb} MB</span>{/if}
             </div>
           </li>
@@ -4299,8 +4312,8 @@
   {#if autoModalOpen}
     <div class="modal-bg" role="dialog" aria-modal="true" aria-label="Voice model required">
       <div class="modal model-modal">
-        <h3>🎙 Нужна модель Whisper</h3>
-        <p>Чтобы распознавать речь, Luna нужно скачать модель Whisper. <strong>base</strong> (142&nbsp;МБ) — хороший баланс скорости и качества для русского и английского.</p>
+        <h3>рџЋ™ РќСѓР¶РЅР° РјРѕРґРµР»СЊ Whisper</h3>
+        <p>Р§С‚РѕР±С‹ СЂР°СЃРїРѕР·РЅР°РІР°С‚СЊ СЂРµС‡СЊ, Luna РЅСѓР¶РЅРѕ СЃРєР°С‡Р°С‚СЊ РјРѕРґРµР»СЊ Whisper. <strong>base</strong> (142&nbsp;РњР‘) вЂ” С…РѕСЂРѕС€РёР№ Р±Р°Р»Р°РЅСЃ СЃРєРѕСЂРѕСЃС‚Рё Рё РєР°С‡РµСЃС‚РІР° РґР»СЏ СЂСѓСЃСЃРєРѕРіРѕ Рё Р°РЅРіР»РёР№СЃРєРѕРіРѕ.</p>
         {#if downloadProgress && installingId}
           <div class="download-row" style="margin: 12px 0 4px;">
             <div class="progress-bar"><div class="fill" style="width: {downloadPct ?? 0}%"></div></div>
@@ -4308,9 +4321,9 @@
           </div>
         {/if}
         <div class="modal-actions">
-          <button class="primary" on:click={() => installWhisperModel('base')} disabled={installingId !== null}>{#if installingId === 'base'}Скачиваю…{:else}Скачать base (142 МБ){/if}</button>
-          <button class="secondary" on:click={postponeModel} disabled={installingId !== null}>Отложить до следующего нажатия</button>
-          <button class="link" on:click={dismissModel} title="Закрыть" disabled={installingId !== null}>×</button>
+          <button class="primary" on:click={() => installWhisperModel('base')} disabled={installingId !== null}>{#if installingId === 'base'}РЎРєР°С‡РёРІР°СЋвЂ¦{:else}РЎРєР°С‡Р°С‚СЊ base (142 РњР‘){/if}</button>
+          <button class="secondary" on:click={postponeModel} disabled={installingId !== null}>РћС‚Р»РѕР¶РёС‚СЊ РґРѕ СЃР»РµРґСѓСЋС‰РµРіРѕ РЅР°Р¶Р°С‚РёСЏ</button>
+          <button class="link" on:click={dismissModel} title="Р—Р°РєСЂС‹С‚СЊ" disabled={installingId !== null}>Г—</button>
         </div>
       </div>
     </div>
@@ -4318,13 +4331,13 @@
 
   {#if imageLightbox}
     <div class="image-lightbox" role="dialog" aria-modal="true" aria-label="Image preview" on:click={() => (imageLightbox = null)} on:keydown={(e) => { if (e.key === 'Escape') imageLightbox = null; }}>
-      <button class="lightbox-close" on:click={() => (imageLightbox = null)} title="Закрыть (Esc)">×</button>
+      <button class="lightbox-close" on:click={() => (imageLightbox = null)} title="Р—Р°РєСЂС‹С‚СЊ (Esc)">Г—</button>
       <img src={imageLightbox.dataUrl} alt={imageLightbox.prompt} on:click|stopPropagation />
       <div class="lightbox-foot" on:click|stopPropagation>
         <div class="lightbox-prompt">{imageLightbox.prompt}</div>
         <div class="lightbox-actions">
           <span class="lightbox-aspect">{imageLightbox.aspect}</span>
-          <button class="secondary" on:click={() => downloadImage(imageLightbox)}>⤓ Скачать</button>
+          <button class="secondary" on:click={() => downloadImage(imageLightbox)}>в¤“ РЎРєР°С‡Р°С‚СЊ</button>
         </div>
       </div>
     </div>
@@ -4334,9 +4347,9 @@
   {#if showNewProject}
     <div class="modal-backdrop" on:click={() => (showNewProject = false)} role="presentation">
       <div class="modal" on:click|stopPropagation role="dialog" aria-labelledby="np-title">
-        <h2 id="np-title">🆕 Новый проект</h2>
+        <h2 id="np-title">рџ†• РќРѕРІС‹Р№ РїСЂРѕРµРєС‚</h2>
         <div class="form-row">
-          <label for="np-name">Имя проекта</label>
+          <label for="np-name">РРјСЏ РїСЂРѕРµРєС‚Р°</label>
           <input
             id="np-name"
             type="text"
@@ -4344,10 +4357,10 @@
             placeholder="my-app"
             on:keydown={(e) => e.key === 'Enter' && submitNewProject()}
           />
-          <small class="muted">латиница, цифры, '.', '_', '-'</small>
+          <small class="muted">Р»Р°С‚РёРЅРёС†Р°, С†РёС„СЂС‹, '.', '_', '-'</small>
         </div>
         <div class="form-row">
-          <label>Шаблон</label>
+          <label>РЁР°Р±Р»РѕРЅ</label>
           <div class="templates">
             {#each npTemplates as t (t.id)}
               <label class="tpl" class:active={npTemplateId === t.id}>
@@ -4359,22 +4372,22 @@
               </label>
             {/each}
             {#if npTemplates.length === 0}
-              <div class="muted">Загрузка…</div>
+              <div class="muted">Р—Р°РіСЂСѓР·РєР°вЂ¦</div>
             {/if}
           </div>
         </div>
         <div class="form-row">
-          <label for="np-parent">Папка для создания</label>
+          <label for="np-parent">РџР°РїРєР° РґР»СЏ СЃРѕР·РґР°РЅРёСЏ</label>
           <input id="np-parent" type="text" bind:value={npParent} placeholder="C:\Users\you\Projects" />
-          <small class="muted">Проект: <code>{npParent || '...'}/{npName || '...'}</code></small>
+          <small class="muted">РџСЂРѕРµРєС‚: <code>{npParent || '...'}/{npName || '...'}</code></small>
         </div>
         {#if npError}
-          <div class="error">⚠ {npError}</div>
+          <div class="error">вљ  {npError}</div>
         {/if}
         <div class="modal-actions">
-          <button class="ghost" on:click={() => (showNewProject = false)} disabled={npBusy}>Отмена</button>
+          <button class="ghost" on:click={() => (showNewProject = false)} disabled={npBusy}>РћС‚РјРµРЅР°</button>
           <button class="primary" on:click={submitNewProject} disabled={npBusy || !npName.trim()}>
-            {npBusy ? 'Создаю…' : 'Создать'}
+            {npBusy ? 'РЎРѕР·РґР°СЋвЂ¦' : 'РЎРѕР·РґР°С‚СЊ'}
           </button>
         </div>
       </div>
@@ -4536,7 +4549,7 @@
   }
   /* Assistant text that follows a tool card gets a thin accent stripe
      on the left + a soft tinted background. Makes the
-     "text → tool → text" pattern visually obvious. */
+     "text в†’ tool в†’ text" pattern visually obvious. */
   .msg-row.assistant.post-tool {
     position: relative;
     margin-top: 2px;
@@ -4622,13 +4635,13 @@
   .msg-bubble .body :global(th) { background: var(--bg-hover); font-weight: 600; }
   .msg-bubble .body :global(tr:nth-child(even) td) { background: var(--bg-elevated); }
 
-  /* Fenced code blocks — produced by the new markdown renderer.
+  /* Fenced code blocks вЂ” produced by the new markdown renderer.
      The outer .codeblock wraps a small head (lang + copy) and a <pre> body
      that no longer wraps lines, so long lines scroll horizontally. */
   .msg-bubble .body :global(.codeblock) { margin: 8px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
   .msg-bubble .body :global(.codeblock-head) { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 4px 12px; background: var(--bg-elevated); border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-muted); }
   .msg-bubble .body :global(.codeblock-lang) { font-family: ui-monospace, 'Cascadia Code', Menlo, monospace; text-transform: lowercase; letter-spacing: 0.3px; opacity: 0.85; }
-  .msg-bubble .body :global(.codeblock-lang:empty)::before { content: 'код'; opacity: 0.5; }
+  .msg-bubble .body :global(.codeblock-lang:empty)::before { content: 'РєРѕРґ'; opacity: 0.5; }
   .msg-bubble .body :global(.codeblock-copy) { background: transparent; border: 0; padding: 3px 8px; border-radius: 4px; cursor: pointer; color: var(--text-muted); font-family: inherit; font-size: 11px; transition: background 120ms ease, color 120ms ease; }
   .msg-bubble .body :global(.codeblock-copy:hover) { background: var(--bg-hover); color: var(--text); }
   .msg-bubble .body :global(.codeblock-copy.copied) { color: var(--success); }
@@ -4654,7 +4667,7 @@
   .caret { display: inline-block; vertical-align: text-bottom; width: 1ch; color: var(--accent); margin-left: 1px; animation: blink 0.9s steps(1) infinite; }
   @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
 
-  /* "Copy message" button — visible on hover of the assistant row. */
+  /* "Copy message" button вЂ” visible on hover of the assistant row. */
   .msg-copy { background: transparent; border: 0; padding: 0 4px; cursor: pointer; color: var(--text-faint); font-family: inherit; font-size: 12px; line-height: 1; opacity: 0; transition: opacity 120ms ease, color 120ms ease; }
   .msg-row.assistant:hover .msg-copy { opacity: 0.7; }
   .msg-copy:hover { color: var(--accent); opacity: 1 !important; }
@@ -5352,7 +5365,7 @@
   .icon-btn.transcribing { background: rgba(208, 144, 64, 0.18); color: #ffc88a; }
   .icon-btn.error { background: rgba(106, 26, 26, 0.4); color: #ffaaaa; }
   @keyframes vpulse { 0% { box-shadow: 0 0 0 0 rgba(208, 64, 64, 0.55); } 50% { box-shadow: 0 0 0 10px rgba(208, 64, 64, 0.15); } 100% { box-shadow: 0 0 0 10px rgba(208, 64, 64, 0); } }
-  /* Multitask mode button — purple/indigo accent so it doesn't clash with
+  /* Multitask mode button вЂ” purple/indigo accent so it doesn't clash with
      the red voice-recording `.active` state. Off = the same muted gray as
      the other icon buttons; on = a soft purple wash with a subtle pulse. */
   .icon-btn.multitask-btn .multitask-glyph { font-size: 17px; line-height: 1; filter: grayscale(0.4); transition: filter 160ms ease, transform 160ms ease; }
@@ -5364,7 +5377,7 @@
      the same purple so the mode is obvious without reading the button. */
   .input-shell.multitask { border-color: rgba(139, 92, 246, 0.55); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 0 0 1px rgba(139, 92, 246, 0.25) inset, 0 0 18px rgba(139, 92, 246, 0.14); }
   .input-shell.multitask .input-bg { opacity: 1; background: linear-gradient(135deg, rgba(99, 102, 241, 0.18), rgba(168, 85, 247, 0.20), rgba(236, 72, 153, 0.12)); }
-  /* Pill in the hint line — only shown when multitask is on. Clickable so
+  /* Pill in the hint line вЂ” only shown when multitask is on. Clickable so
      the user can toggle off without having to reach for the icon button. */
   .hint-pill.multitask-pill { background: rgba(139, 92, 246, 0.18); border: 1px solid rgba(139, 92, 246, 0.45); color: #c4b5fd; font-size: 10px; font-weight: 600; cursor: pointer; transition: background 150ms ease, border-color 150ms ease, color 150ms ease; padding: 1px 8px; border-radius: 999px; }
   .hint-pill.multitask-pill:hover { background: rgba(139, 92, 246, 0.28); border-color: rgba(139, 92, 246, 0.65); color: #ddd6fe; }
@@ -6293,3 +6306,13 @@
   :global(html:not(.theme-dark)) .context-cost-sep,
   :global(html:not(.theme-dark)) .context-numbers-sep { color: #cfc8b8; }
 </style>
+
+<!-- Phase UX-2: credentials modal. Mounted once at the bottom of the
+     template; showCredentials toggles it. The modal itself is in
+     CredentialManager.svelte. -->
+{#if showCredentials}
+  <CredentialManager
+    onClose={() => (showCredentials = false)}
+    on:changed={() => credentialsRev++}
+  />
+{/if}

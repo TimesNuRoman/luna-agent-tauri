@@ -229,7 +229,11 @@ fn tool_browser_type() -> MinimaxTool {
                 any element with `contenteditable=true`. The element is \
                 found by CSS selector and focused before typing. Each \
                 character is sent as a key event so the page's JS \
-                handlers run as a real user would."
+                handlers run as a real user would. For passwords, tokens, \
+                and other secrets, pass `secret_ref` (a label like \
+                'password', 'token') instead of `text` — the value comes \
+                from the user's keyring and is NEVER visible to the model. \
+                Exactly one of `text` or `secret_ref` must be set."
                 .into(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -242,10 +246,25 @@ fn tool_browser_type() -> MinimaxTool {
                         "type": "string",
                         "description": "Text to type. Unicode is allowed but \
                             line breaks are not — use 'browser_press_key' \
-                            for Enter."
+                            for Enter. Do NOT use for passwords / tokens — \
+                            pass `secret_ref` instead so the value never \
+                            enters the model context."
+                    },
+                    "secret_ref": {
+                        "type": "string",
+                        "description": "Label of a credential the task was \
+                            started with via `azazel_run`'s `credentials` \
+                            map. The supervisor resolves the label to a \
+                            real value from the OS keyring right before \
+                            typing. Example: azazel_run({credentials: \
+                            {\"password\": \"vk.com/password\"}, ...}) -> \
+                            here you pass secret_ref='password'."
                     }
                 },
-                "required": ["selector", "text"]
+                "oneOf": [
+                    { "required": ["selector", "text"] },
+                    { "required": ["selector", "secret_ref"] }
+                ]
             }),
         },
     }

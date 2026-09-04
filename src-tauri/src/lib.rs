@@ -187,6 +187,15 @@ pub struct AppState {
     /// with default policy at startup; per-conversation counters
     /// are reset by the supervisor (D2+). See `services::daimonion::vision`.
     pub daimonion_vision: parking_lot::Mutex<services::daimonion::VisionGate>,
+    /// Per-task resolved credentials (Phase UX-2). Keyed by
+    /// `task_id`; inserted by the `azazel_run` tool dispatcher
+    /// after resolving the model's `credentials: {label: slot}`
+    /// map against the keyring, and removed by the Azazel
+    /// supervisor before the first step runs (and on cancel). The
+    /// values never live on disk; the supervisor's
+    /// `Sensitive<String>` wrapper scrubs them from logs and
+    /// screenshots.
+    pub task_secrets: parking_lot::Mutex<std::collections::HashMap<String, std::collections::HashMap<String, String>>>,
     /// Named personas (Raziel / MorningStar / Daimonion). The
     /// Tauri command layer reads this directly (e.g. Daimonion's
     /// `daimonion_chat` resolves the active persona's system prompt
@@ -2279,17 +2288,22 @@ fn luna_tools_schema() -> serde_json::Value {
             "type": "function",
             "function": {
                 "name": "azazel_run",
-                "description": "Dispatch a browser-automation task to Azazel, Luna's autonomous browser agent. Azazel opens a real Chromium tab, navigates, clicks, types, extracts, and reports back. Use this for ANY task that requires interacting with a website: logging in (social media, banking, SaaS, email), filling forms, posting content (status updates, comments, images), scraping structured data from logged-in pages, multi-step web workflows. Returns a task_id immediately; the actual run is async and streams live screenshots / action timeline through the chat aug card. Do NOT call for static read-only fetches (use web_search or fetch_url for that). Do NOT call for local file or shell work (use read_file / run_command). For an empty Azazel session (no live run), the user can also type /azazel <prompt> in chat to start one manually.",
+                "description": "Dispatch a browser-automation task to Azazel, Luna's autonomous browser agent. Azazel opens a real Chromium tab, navigates, clicks, types, extracts, and reports back. Use this for ANY task that requires interacting with a website: logging in (social media, banking, SaaS, email), filling forms, posting content (status updates, comments, images), scraping structured data from logged-in pages, multi-step web workflows. Returns a task_id immediately; the actual run is async and streams live screenshots / action timeline through the chat aug card. Do NOT call for static read-only fetches (use web_search or fetch_url for that). Do NOT call for local file or shell work (use read_file / run_command). For an empty Azazel session (no live run), the user can also type /azazel <prompt> in chat to start one manually. If the task needs login or API tokens, pass them via the `credentials` field — that field references credential SLOTS stored on the user's machine (e.g. vk.com/username), NOT raw secrets. The model never sees the actual passwords; the backend resolves the slots and injects the values into the browser session only.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "prompt": {
                             "type": "string",
-                            "description": "What Azazel should do. Be specific: target URL, what to log in / click / type, what the end state should look like. Example: 'Log into VK with the credentials from user_interests, navigate to my profile, post a picture of a cat on the wall with the caption от луны'."
+                            "description": "What Azazel should do. Be specific: target URL, what to log in / click / type, what the end state should look like. Example: 'Log into VK and post a picture of a cat on the wall with the caption от луны'."
                         },
                         "title": {
                             "type": "string",
                             "description": "Short human-readable label for the task (<= 60 chars). Shows in the chat aug card and the Azazel panel."
+                        },
+                        "credentials": {
+                            "type": "object",
+                            "description": "Map of {label: slot_name} where each value is a credential SLOT (e.g. 'vk.com/username', 'github.com/token'), not the actual value. Keys are how you refer to the credential in your prompt and tool calls (e.g. 'use {{credentials.username}} to log in'). Missing slots are reported as errors. The user adds slots via the 🔑 Credentials button in the chat input area; the chat UI's list tool shows available slot names.",
+                            "additionalProperties": { "type": "string" }
                         }
                     },
                     "required": ["prompt"]
@@ -4260,27 +4274,90 @@ async fn minimax_chat_stream(
                             .and_then(|t| t.as_str())
                             .map(|s| s.to_string())
                             .unwrap_or_else(|| prompt.chars().take(60).collect());
+                        // Resolve `credentials: {label: slot_name}`. Each
+                        // value is a slot name in the OS keyring; the
+                        // actual password/token stays on the user's
+                        // machine and is only injected into the
+                        // browser session via AppState::task_secrets.
+                        let credentials_map: std::collections::HashMap<String, String> = args
+                            .get("credentials")
+                            .and_then(|v| v.as_object())
+                            .map(|obj| {
+                                obj.iter()
+                                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let mut resolved_secrets: std::collections::HashMap<String, String> =
+                            std::collections::HashMap::new();
+                        let mut missing: Vec<String> = Vec::new();
+                        for (label, slot) in &credentials_map {
+                            match services::credentials::get(slot) {
+                                Ok(value) => {
+                                    resolved_secrets.insert(label.clone(), value);
+                                }
+                                Err(services::credentials::CredentialError::NotFound(_)) => {
+                                    missing.push(slot.clone());
+                                }
+                                Err(e) => {
+                                    missing.push(format!("{slot} ({e})"));
+                                }
+                            }
+                        }
+                        if !missing.is_empty() {
+                            let tool_msg = serde_json::json!({
+                                "role": "tool",
+                                "tool_call_id": id,
+                                "content": format!(
+                                    "Error: the following credential slots are not in the keyring: {}. Ask the user to add them via the 🔑 Credentials button, or call azazel_run without the missing slots.",
+                                    missing.join(", ")
+                                ),
+                            });
+                            messages.push(tool_msg);
+                            let _ = app.emit("ai_tool_result", serde_json::json!({
+                                "id": id, "name": name, "ok": false,
+                                "error": format!("missing credentials: {missing:?}"),
+                            }));
+                            continue;
+                        }
                         // Surface the tool_use to the front-end so the
-                        // Azazel sidecard opens in chat.
+                        // Azazel sidecard opens in chat. We only emit
+                        // slot names (not values).
+                        let slots_only: std::collections::HashMap<&str, &str> = credentials_map
+                            .iter()
+                            .map(|(k, v)| (k.as_str(), v.as_str()))
+                            .collect();
                         let _ = app.emit(
                             "ai_tool_use",
                             serde_json::json!({
                                 "id": id, "name": name,
-                                "args": { "prompt": &prompt, "title": &title },
+                                "args": {
+                                    "prompt": &prompt,
+                                    "title": &title,
+                                    "credentials": slots_only,
+                                },
                             }),
                         );
                         // Inlined body of the `azazel_run` Tauri command
                         // (Rust-to-Rust call; we don't go through IPC).
-                        // Mirrors services::azazel_run but stays in
-                        // this process so the tool result is consistent
-                        // with the rest of the doChat loop.
                         use services::agent::task::defaults;
-                        let result: Result<String, String> = (|| {
+                        let task_id = format!("task-{}", uuid::Uuid::new_v4());
+                        // Stash the resolved secrets in AppState so the
+                        // Azazel supervisor can read them at step time.
+                        // The map is removed by the supervisor (or by
+                        // the cancel path) after the task ends.
+                        if !resolved_secrets.is_empty() {
+                            let state = app.state::<crate::AppState>();
+                            state
+                                .task_secrets
+                                .lock()
+                                .insert(task_id.clone(), resolved_secrets);
+                        }
+                        let result: Result<(), String> = (|| {
                             let state = app.state::<crate::TaskDeps>();
                             let mut mgr = state.task_manager.lock();
-                            let id = format!("task-{}", uuid::Uuid::new_v4());
                             let task = services::agent::Task::new_browser(
-                                id.clone(),
+                                task_id.clone(),
                                 title.clone(),
                                 prompt.clone(),
                                 defaults::DEFAULT_MODEL.to_string(),
@@ -4291,23 +4368,35 @@ async fn minimax_chat_stream(
                                 200_000,
                             );
                             let app_for_runner = app.clone();
-                            let id_for_runner = id.clone();
-                            mgr.create(task, move |_handle| {
-                                services::agent::TaskRunner::spawn(
-                                    app_for_runner,
-                                    id_for_runner,
-                                );
-                            })
-                            .map_err(|e| e.to_string())
-                            .map(|_| id)
+                            let id_for_runner = task_id.clone();
+                            // mgr.create returns the task id; we
+                            // already have it from the outer scope
+                            // and only care about the Ok/Err signal.
+                            mgr
+                                .create(task, move |_handle| {
+                                    services::agent::TaskRunner::spawn(
+                                        app_for_runner,
+                                        id_for_runner,
+                                    );
+                                })
+                                .map(|_| ())
+                                .map_err(|e| e.to_string())
                         })();
                         match result {
-                            Ok(task_id) => {
+                            Ok(()) => {
+                                let creds_summary = if credentials_map.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(
+                                        " Resolved {} credential slot(s); the model never saw the values.",
+                                        credentials_map.len()
+                                    )
+                                };
                                 let tool_msg = serde_json::json!({
                                     "role": "tool",
                                     "tool_call_id": id,
                                     "content": format!(
-                                        "Azazel task `{task_id}` started. The user can watch the live screenshot + action timeline in the chat Azazel card (or the Azazel tab). The task runs async; its final summary is delivered through the chat aug card, so you usually do not need to poll further."
+                                        "Azazel task `{task_id}` started. The user can watch the live screenshot + action timeline in the chat Azazel card (or the Azazel tab). The task runs async; its final summary is delivered through the chat aug card, so you usually do not need to poll further.{creds_summary}"
                                     ),
                                 });
                                 messages.push(tool_msg);
@@ -4318,6 +4407,11 @@ async fn minimax_chat_stream(
                                 any_executed = true;
                             }
                             Err(e) => {
+                                // Roll back the stashed secrets — the
+                                // task didn't start, no supervisor
+                                // will read them.
+                                let state = app.state::<crate::AppState>();
+                                state.task_secrets.lock().remove(&task_id);
                                 let tool_msg = serde_json::json!({
                                     "role": "tool",
                                     "tool_call_id": id,
@@ -6972,6 +7066,55 @@ fn persona_error_message(e: &services::agent::personas::PersonaError) -> String 
     }
 }
 
+// =====================================================================
+// Credentials (Phase UX-2)
+//
+// Slug convention: `{site}/{field}` (lowercase ASCII, no spaces).
+// Examples: `vk.com/username`, `github.com/token`, `google.com/password`.
+// All values live in the OS keyring (same backend as API keys) under
+// the namespace `luna/cred/<slug>`. The Azazel tool dispatcher resolves
+// slot names -> real values right before the browser agent runs; the
+// model never sees the values, only the slot names.
+// =====================================================================
+
+/// Validate a credential slot name. Public so the UI can pre-validate
+/// user input before sending it over IPC.
+#[tauri::command]
+fn credential_validate_slot(slot: String) -> Result<(), String> {
+    services::credentials::validate_slot(&slot).map_err(|e| format!("{e}"))
+}
+
+/// Store a credential value in the OS keyring under `slot`. Overwrites
+/// any existing value. The slot name is the public handle; the value
+/// is never returned to the model (only `credential_list` and the
+/// chat UI can see slot names + metadata).
+#[tauri::command]
+fn credential_set(slot: String, value: String) -> Result<(), String> {
+    services::credentials::set_with_index(&slot, &value).map_err(|e| format!("{e}"))
+}
+
+/// Read a single credential. The chat UI uses this only for the
+/// "show value" toggle; the model-side tools do NOT call this — they
+/// reference credentials by slot name in the `azazel_run` tool.
+#[tauri::command]
+fn credential_get(slot: String) -> Result<String, String> {
+    services::credentials::get(&slot).map_err(|e| format!("{e}"))
+}
+
+/// List stored credentials. Returns slot names + value length (NOT
+/// the value itself) so the UI can show "vk.com/username (12 chars)"
+/// without ever round-tripping the secret through the model.
+#[tauri::command]
+fn credential_list() -> Result<Vec<services::credentials::CredentialInfo>, String> {
+    services::credentials::list().map_err(|e| format!("{e}"))
+}
+
+/// Delete a credential. Idempotent.
+#[tauri::command]
+fn credential_delete(slot: String) -> Result<(), String> {
+    services::credentials::delete_with_index(&slot).map_err(|e| format!("{e}"))
+}
+
 /// Spawn a Raziel task in memory-keeper mode. The user message
 /// becomes the task prompt; the runner loads the persona's
 /// system_prompt + tool whitelist from the registry and runs
@@ -9365,6 +9508,12 @@ pub fn run() {
             persona_get,
             persona_reload,
             persona_fire_slash,
+            // Credentials (Phase UX-2)
+            credential_validate_slot,
+            credential_set,
+            credential_get,
+            credential_list,
+            credential_delete,
             raziel_chat,
             raziel_run_fusion_news,
             // Mephistopheles (P0+ design agent)

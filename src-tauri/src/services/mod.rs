@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod azazel;
 pub mod chat_sink;
+pub mod credentials;
 pub mod daimonion;
 pub mod design;
 pub mod evolver;

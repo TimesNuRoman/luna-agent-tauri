@@ -624,6 +624,70 @@ export type PersonaSlashTrigger = Extract<
   { kind: 'slash_command' }
 >;
 
+// ---------- Credentials (Phase UX-2) ----------
+
+/** Public metadata for a stored credential. The value is NEVER
+ *  included in this DTO — only the slot name, value length, and
+ *  creation time (when the keyring backend supports it). */
+export interface CredentialInfo {
+  slot: string;
+  created_at: string | null;
+  value_length: number;
+}
+
+/** Validate a slot name (e.g. 'vk.com/username'). Pure client-side
+ *  check that mirrors the Rust validator. */
+export function isValidCredentialSlot(slot: string): boolean {
+  if (!slot) return false;
+  const slash = slot.indexOf('/');
+  if (slash < 1 || slash === slot.length - 1) return false;
+  const site = slot.slice(0, slash);
+  const field = slot.slice(slash + 1);
+  if (!site || !field) return false;
+  return (
+    /^[a-z0-9.-]+$/.test(site) &&
+    /^[a-z0-9_]+$/.test(field)
+  );
+}
+
+/** List stored credentials (no values, only slot + length). */
+export async function credentialList(): Promise<CredentialInfo[]> {
+  return invoke<CredentialInfo[]>('credential_list');
+}
+
+/** Validate a slot name on the Rust side. Returns the validation
+ *  error string, or `null` if the slot is valid. */
+export async function credentialValidateSlot(
+  slot: string,
+): Promise<string | null> {
+  try {
+    await invoke('credential_validate_slot', { slot });
+    return null;
+  } catch (e) {
+    return String(e);
+  }
+}
+
+/** Store a credential value in the OS keyring. The value is sent
+ *  over IPC in cleartext once and then lives only in the keyring. */
+export async function credentialSet(
+  slot: string,
+  value: string,
+): Promise<void> {
+  await invoke('credential_set', { slot, value });
+}
+
+/** Read a credential value. Use sparingly — the chat UI uses this
+ *  only for the "show value" toggle, never for tool calls. */
+export async function credentialGet(slot: string): Promise<string> {
+  return invoke<string>('credential_get', { slot });
+}
+
+/** Delete a credential. Idempotent. */
+export async function credentialDelete(slot: string): Promise<void> {
+  await invoke('credential_delete', { slot });
+}
+
 // ---------- API keys (keyring-backed) ----------
 
 /**

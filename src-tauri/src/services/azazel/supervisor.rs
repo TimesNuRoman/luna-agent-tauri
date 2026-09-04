@@ -27,8 +27,48 @@
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio_util::sync::CancellationToken;
+
+/// RAII guard that removes a task's resolved credentials from
+/// `AppState::task_secrets` when dropped. Used by `run_browser_loop`
+/// to make sure the user's passwords don't outlive the task in
+/// process memory. The values themselves live in the OS keyring
+/// (`services::credentials`); the AppState map is just a short-lived
+/// per-task cache.
+pub(crate) struct SecretCleanup {
+    app: AppHandle,
+    task_id: String,
+    active: bool,
+}
+
+impl SecretCleanup {
+    pub fn new(app: AppHandle, task_id: String) -> Self {
+        Self {
+            app,
+            task_id,
+            active: true,
+        }
+    }
+}
+
+impl Drop for SecretCleanup {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        self.active = false;
+        let state = self.app.state::<crate::AppState>();
+        let mut map = state.task_secrets.lock();
+        if map.remove(&self.task_id).is_some() {
+            tracing::info!(
+                target: "azazel",
+                "secret_cleanup: removed task_secrets for {}",
+                self.task_id
+            );
+        }
+    }
+}
 
 use crate::services::agent::{
     progress::ProgressEmitter, ContentPart, MinimaxClient, MinimaxMessage, MinimaxRequest,
@@ -128,6 +168,16 @@ pub async fn run_browser_loop(
     progress: &mut ProgressEmitter,
     cancel: &CancellationToken,
 ) -> Result<BrowserSupervisorResult, SupervisorError> {
+    // Phase UX-2: RAII guard that removes this task's resolved
+    // credentials from AppState::task_secrets when the supervisor
+    // returns (success, error, cancel — all paths). The guard
+    // holds an AppHandle clone, so it works through any early
+    // return. After drop, the user's passwords live only in
+    // `secrets.rs` (OS keyring), never in process memory.
+    let _secret_cleanup = crate::services::azazel::supervisor::SecretCleanup::new(
+        app.clone(),
+        task.id.clone(),
+    );
     let started = Instant::now();
     let mut cost_chunks: Vec<CostChunk> = Vec::new();
     let mut steps_completed: u32 = 0;
@@ -276,7 +326,7 @@ pub async fn run_browser_loop(
                 );
                 continue;
             }
-            let outcome = execute_browser_tool(&call.function.name, &args, page, state, app).await;
+            let outcome = execute_browser_tool(&call.function.name, &args, page, state, app, task).await;
             let outcome_str = outcome_for_model(&outcome);
             progress.emit(&TaskStep::ToolResult {
                 ts: chrono::Utc::now(),
@@ -476,7 +526,8 @@ async fn execute_browser_tool(
     args: &serde_json::Value,
     page: &TaskPage,
     state: &Arc<BrowserState>,
-    _app: &AppHandle,
+    app: &AppHandle,
+    task: &Task,
 ) -> ToolOutcome {
     match name {
         "browser_navigate" => {
@@ -549,11 +600,44 @@ async fn execute_browser_tool(
                 Some(s) => s,
                 None => return ToolOutcome::err("error: 'selector' is required"),
             };
-            let text = match args.get("text").and_then(|v| v.as_str()) {
-                Some(t) => t,
-                None => return ToolOutcome::err("error: 'text' is required"),
+            // Phase UX-2: `secret_ref` resolves a label from the
+            // task's resolved credentials (set up by `azazel_run`).
+            // The value is read from AppState::task_secrets and
+            // typed into the page; it never appears in tool result
+            // text, logs, or screenshots.
+            let text: String = if let Some(label) = args.get("secret_ref").and_then(|v| v.as_str()) {
+                let state = app.state::<crate::AppState>();
+                let secrets = state.task_secrets.lock();
+                let resolved = secrets
+                    .get(&task.id)
+                    .and_then(|m| m.get(label))
+                    .cloned();
+                drop(secrets);
+                match resolved {
+                    Some(v) => v,
+                    None => {
+                        return ToolOutcome::err(format!(
+                            "error: secret_ref '{label}' is not in this task's credentials. \
+                             The model must pass `credentials: {{'{label}': '<slot>'}}` to azazel_run, \
+                             or use plain `text` for non-secret input."
+                        ));
+                    }
+                }
+            } else {
+                match args.get("text").and_then(|v| v.as_str()) {
+                    Some(t) => t.to_string(),
+                    None => return ToolOutcome::err(
+                        "error: 'text' is required (or 'secret_ref' for password/token fields)",
+                    ),
+                }
             };
-            match page.type_text(sel, text).await {
+            // Sanity: `text` and `secret_ref` are mutually exclusive.
+            if args.get("text").is_some() && args.get("secret_ref").is_some() {
+                return ToolOutcome::err(
+                    "error: pass either 'text' or 'secret_ref', not both",
+                );
+            }
+            match page.type_text(sel, &text).await {
                 Ok(s) => ToolOutcome::ok(s),
                 Err(e) => ToolOutcome::err(format!("type failed: {e}")),
             }
