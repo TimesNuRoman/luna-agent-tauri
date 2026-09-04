@@ -1,21 +1,188 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Luna Agent</title>
-  <style>
-    body { margin: 0; background: #09090b; color: #f0f0f5; font-family: Inter, system-ui, sans-serif; }
-    #loading { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 16px; }
-    .brand { font-size: 24px; font-weight: 700; color: #C9A0A0; }
-    .sub { font-size: 13px; color: #9090a0; }
-  </style>
-  <script type="module" crossorigin src="./assets/index-B0-KkDun.js"></script>
-</head>
-<body>
-  <div id="loading">
-    <div class="brand">Luna Agent</div>
-    <div class="sub">Loading desktop app...</div>
-  </div>
-</body>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Luna Agent</title>
+    <script>
+      // Apply the saved theme BEFORE the first paint so we don't flash.
+      try {
+        var t = localStorage.getItem('luna.theme');
+        if (!t) t = 'light'; // default
+        if (t === 'auto') {
+          t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'dark' : 'light';
+        }
+        if (t === 'dark') document.documentElement.classList.add('theme-dark');
+      } catch (e) { /* localStorage might be unavailable */ }
+    </script>
+    <style>
+      /* Theme variables. :root holds the LIGHT theme (the default).
+         .theme-dark overrides. Components use var(--name). */
+      :root {
+        /* Surfaces */
+        --bg: #f7f5f1;            /* body / page */
+        --bg-elevated: #fdfcf9;   /* cards, panels */
+        --bg-input: #ffffff;      /* inputs, textareas */
+        --bg-hover: #efece6;      /* hover surfaces */
+        --bg-active: #e6e2da;     /* pressed / selected */
+        --bg-overlay: rgba(20, 18, 16, 0.45);
+
+        /* Borders */
+        --border: #e2ddd2;
+        --border-strong: #cfc8b8;
+        --border-subtle: #ece8de;
+
+        /* Text */
+        --text: #1a1c20;
+        --text-muted: #5a6068;
+        --text-faint: #8a8f97;
+        --text-inverse: #f6f3ed;
+
+        /* Accents (work on both themes) */
+        --accent: #b07878;        /* rose-gold, slightly deeper on light */
+        --accent-soft: rgba(176, 120, 120, 0.14);
+        --accent-strong: #945a5a;
+        --info: #6a8aaf;
+        --info-soft: rgba(106, 138, 175, 0.14);
+        --success: #5e9272;
+        --success-soft: rgba(94, 146, 114, 0.14);
+        --warn: #a47b3e;
+        --warn-soft: rgba(164, 123, 62, 0.14);
+        --danger: #a85151;
+        --danger-soft: rgba(168, 81, 81, 0.14);
+
+        /* Code / mono */
+        --code-bg: #efece4;
+        --code-fg: #2d2418;
+
+        /* Scrollbar */
+        --scrollbar: #d6d0c2;
+        --scrollbar-hover: #b8b2a3;
+
+        /* Shadows */
+        --shadow-1: 0 1px 2px rgba(60, 50, 40, 0.06), 0 1px 3px rgba(60, 50, 40, 0.05);
+        --shadow-2: 0 4px 12px rgba(60, 50, 40, 0.10), 0 2px 4px rgba(60, 50, 40, 0.06);
+
+        /* ===== Research / Code-mode surfaces (Fusion Research v2 + Cursor-like code panel) =====
+           These power the dark-frozen blocks (.research-sources, .r-card, .file-tree-pane,
+           .preview-pane, .edit-card, .read-card, .modal-*) so they adapt to the light theme. */
+        --code-pane-bg: #f0ede5;       /* file-tree / preview background */
+        --code-pane-fg: #1a1c20;
+        --code-pane-muted: #5a6068;
+        --code-pane-faint: #8a8f97;
+        --code-pane-border: #d6d0c2;
+        --code-pane-card: #fdfcf9;     /* card on the pane */
+        --code-pane-input: #ffffff;
+        --code-pane-hover: #e6e2da;
+        --code-pane-active: #ddd5c5;
+        --code-cta: #b07878;           /* primary action (was #f5b56b on dark) */
+        --code-cta-fg: #fdfcf9;
+        --code-cta-soft: rgba(176, 120, 120, 0.14);
+        --source-workspace: #b07878;
+        --source-web: #6a8aaf;
+        --source-news: #5e9272;
+
+        /* Thinking block (purple reasoning) — same hue, light-tinted */
+        --think-border: rgba(168, 130, 200, 0.30);
+        --think-bg: rgba(168, 130, 200, 0.06);
+        --think-fg: #7a5ca8;
+        --think-fg-soft: #9376b8;
+        --think-spin-track: rgba(122, 92, 168, 0.25);
+
+        /* Scroll-to-bottom floating button */
+        --scroll-btn-bg: #ffffff;
+        --scroll-btn-fg: #b07878;
+        --scroll-btn-border: rgba(176, 120, 120, 0.30);
+
+        /* Inline image frame */
+        --image-bg: #ece8de;
+        --image-foot-bg: rgba(60, 50, 40, 0.04);
+        --image-foot-fg: #5a6068;
+        --image-foot-border: rgba(60, 50, 40, 0.06);
+
+        /* Color-scheme hint for form controls / scrollbars */
+        color-scheme: light;
+      }
+      .theme-dark {
+        --bg: #0f1217;
+        --bg-elevated: #16191f;
+        --bg-input: #1c1f26;
+        --bg-hover: #252932;
+        --bg-active: #2c313a;
+        --bg-overlay: rgba(0, 0, 0, 0.55);
+
+        --border: #2c313a;
+        --border-strong: #3a414b;
+        --border-subtle: #1f2329;
+
+        --text: #e6e8eb;
+        --text-muted: #8a93a6;
+        --text-faint: #6c7280;
+        --text-inverse: #0f1217;
+
+        --accent: #c9a0a0;
+        --accent-soft: rgba(201, 160, 160, 0.14);
+        --accent-strong: #d8b4b4;
+        --info: #88a4c4;
+        --info-soft: rgba(136, 164, 196, 0.16);
+        --success: #7ac98a;
+        --success-soft: rgba(122, 201, 138, 0.16);
+        --warn: #d8c89a;
+        --warn-soft: rgba(216, 200, 154, 0.18);
+        --danger: #d88a8a;
+        --danger-soft: rgba(216, 138, 138, 0.18);
+
+        --code-bg: #0a0c12;
+        --code-fg: #b6bcc7;
+
+        --scrollbar: #2c313a;
+        --scrollbar-hover: #3a414b;
+
+        --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.25);
+        --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3);
+
+        /* Research / Code-mode surfaces — dark equivalents of the light vars above */
+        --code-pane-bg: #0c0f14;
+        --code-pane-fg: #e6e8eb;
+        --code-pane-muted: #b6bcc7;
+        --code-pane-faint: #8b929b;
+        --code-pane-border: #2c313a;
+        --code-pane-card: #181b21;
+        --code-pane-input: #181b21;
+        --code-pane-hover: #21262e;
+        --code-pane-active: #2a313c;
+        --code-cta: #f5b56b;
+        --code-cta-fg: #1a1108;
+        --code-cta-soft: rgba(245, 181, 107, 0.15);
+        --source-workspace: #c9a0a0;
+        --source-web: #6f9ce8;
+        --source-news: #a8c97a;
+
+        --think-border: rgba(168, 130, 200, 0.30);
+        --think-bg: rgba(168, 130, 200, 0.06);
+        --think-fg: #c4a8ff;
+        --think-fg-soft: #b6a8d6;
+        --think-spin-track: rgba(196, 168, 255, 0.25);
+
+        --scroll-btn-bg: #1c1f26;
+        --scroll-btn-fg: #c9a0a0;
+        --scroll-btn-border: rgba(201, 160, 160, 0.30);
+
+        --image-bg: #0a0c12;
+        --image-foot-bg: rgba(0, 0, 0, 0.4);
+        --image-foot-fg: #b6bcc7;
+        --image-foot-border: rgba(255, 255, 255, 0.04);
+
+        color-scheme: dark;
+      }
+      html, body { background: var(--bg); color: var(--text); margin: 0; padding: 0; }
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Cascadia Code', Menlo, monospace; }
+    </style>
+    <script type="module" crossorigin src="/assets/index-Bxvh3nmI.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-PoC4y-IK.css">
+  </head>
+  <body>
+    <div id="app"></div>
+  </body>
 </html>
