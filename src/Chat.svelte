@@ -130,6 +130,18 @@
    *  from the head of the list. */
   const AUG_PER_TYPE_CAP = 4;
 
+  // Phase UX-2: credentials modal toggle. Mounted at the bottom of
+  // the template as `{#if showCredentials} <CredentialManager … />`.
+  // MUST live at the top of <script> (not inside onMount) so the
+  // template closure can see it. Declaring it inside onMount was a
+  // real bug — caused `ReferenceError: showCredentials is not
+  // defined` in the template fragment at HMR.
+  let showCredentials = false;
+  // Bumped after credentialList changes so the aug system can
+  // re-resolve any in-flight tool calls. Mostly informational —
+  // the model only ever sees slot names, never values.
+  let credentialsRev = 0;
+
   function activateAug(
     aug: Augmentation,
     args: string,
@@ -2956,15 +2968,6 @@
     // Phase UX-1: register the chat augmentations on first mount.
     // Idempotent вЂ” HMR can re-run onMount; the bootstrap guards itself.
     bootstrapAugmentations();
-
-  // Phase UX-2: credentials modal toggle. The modal itself is
-  // mounted at the bottom of the template; this flag is the
-  // single source of truth for visibility.
-  let showCredentials = false;
-  // Bumped after credentialList changes so the aug system can
-  // re-resolve any in-flight tool calls (mostly informational вЂ”
-  // the model only sees slot names, never values).
-  let credentialsRev = 0;
 
     // Phase UX-1: forward backend `persona:slash-fired` events into the
     // local aug system so a backend-driven slash (e.g. from the TG bot
