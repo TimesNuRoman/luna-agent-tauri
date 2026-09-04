@@ -2713,57 +2713,16 @@ async fn minimax_chat_stream(
     }
 
     // -- MiniMax tool awareness -----------------------------------------------
-    // M3 receives `tools` in the API body but does not always treat the
-    // schema as "my capabilities" unless the system prompt explicitly
-    // enumerates them. We append a compact tool list to the first system
-    // message (or insert one if none) so the model can never answer
-    // "Tool not found" when the tools are right there. Tool descriptions
-    // are intentionally short — full JSON Schema is already in the
-    // `tools` array, this is just a discovery hint.
-    let tool_names: Vec<String> = {
-        let tools = match req.tools_preset.as_deref() {
-            Some("three_d") => three_d_tools_schema(),
-            _ => luna_tools_schema(),
-        };
-        if let Some(arr) = tools.as_array() {
-            arr.iter()
-                .filter_map(|t| t.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()))
-                .map(String::from)
-                .collect()
-        } else {
-            Vec::new()
-        }
-    };
-    if !tool_names.is_empty() {
-        let tool_list = tool_names
-            .iter()
-            .map(|n| format!("- `{}`", n))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let tool_hint = format!(
-            "\n\n[Available tools — call them via the `tools` array, do NOT answer \"Tool not found\". \
-             If a user request matches one of these, emit the function call instead of describing it.]\n{}",
-            tool_list
-        );
-        // Append to the first system message; create one if there isn't.
-        if let Some(sys) = messages
-            .iter_mut()
-            .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"))
-        {
-            if let Some(content) = sys.get("content").and_then(|c| c.as_str()) {
-                let new_content = format!("{}{}", content, tool_hint);
-                sys.as_object_mut().unwrap().insert(
-                    "content".into(),
-                    serde_json::Value::String(new_content),
-                );
-            }
-        } else {
-            messages.insert(
-                0,
-                serde_json::json!({ "role": "system", "content": tool_hint.trim_start() }),
-            );
-        }
-    }
+    // DISABLED (was: append "Available tools:" hint to the system
+    // prompt). Rationale: M3's tokenizer mashes adjacent words into
+    // single tokens when the context is full of underscored
+    // identifiers — the rendered reply then loses spaces in places
+    // like "forTelegram bots" and "VKAPI". Letting the model read
+    // the tools from the API body (lines below) is enough; the
+    // textual hint in the system prompt was a regression we don't
+    // need. Re-enable here if a future M4 model regresses on
+    // "Tool not found" answers and the API-body tools alone aren't
+    // enough.
 
     for _ in 0..MAX_TOOL_ITERATIONS {
         // Build request body for this iteration.
@@ -2780,7 +2739,7 @@ async fn minimax_chat_stream(
             Some("three_d") => three_d_tools_schema(),
             _ => luna_tools_schema(),
         };
-        body_map.insert("tools".to_string(), tools);
+        body_map.insert("tools".to_string(), tools.clone());
         // For the 3D preset, force the model to call a tool every turn.
         // Without this, M3 happily replies "I'll add a box" as text and
         // never invokes three_d_apply_ops, so the scene never changes.
@@ -2844,10 +2803,11 @@ async fn minimax_chat_stream(
         let mut first_event_logged = false;
         let minimax_debug = std::env::var("MINIMAX_DEBUG").ok().as_deref() == Some("1");
         if minimax_debug {
+            let tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0);
             eprintln!(
                 "[doChat] → MiniMax: model={} tools={} tool_choice={} messages={}",
                 model,
-                tool_names.len(),
+                tool_count,
                 tool_choice,
                 messages.len()
             );
