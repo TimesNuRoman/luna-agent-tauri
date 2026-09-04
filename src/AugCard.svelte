@@ -7,6 +7,10 @@
   // the luna:switch-tab event to jump to the legacy tab while the
   // migration is in progress; P4 routes removed tabs through the aug
   // system instead).
+  //
+  // If the registered aug descriptor carries a `component`, that
+  // component is rendered as the card body, receiving the full
+  // AugProps so it can host its own rich UI (form, timeline, etc.).
 
   import type { AugProps } from './lib/augmentations';
 
@@ -75,6 +79,19 @@
     {#if args}
       <p class="aug-args">{args}</p>
     {/if}
+    {#if aug.body}
+      <div class="aug-body">
+        <svelte:component
+          this={aug.body}
+          {instanceId}
+          {augId}
+          {args}
+          {pinned}
+          {onDismiss}
+          {onTogglePin}
+        />
+      </div>
+    {/if}
   </div>
 {:else}
   <div class="aug-card aug-missing" data-aug-id={augId}>
@@ -133,5 +150,11 @@
     color: var(--text-muted, #9aa0a6);
     font-size: 11px;
     word-break: break-word;
+  }
+  .aug-body {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border, #2a2a2e);
+    font-size: 12px;
   }
 </style>

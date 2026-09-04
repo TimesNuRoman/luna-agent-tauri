@@ -1,5 +1,10 @@
 // Luna Agent — бинарь-обёртка. Вся логика в `lib::run` (библиотечный корень).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// The `luna_tools_schema` function builds a 30+ tool JSON literal via
+// `serde_json::json!([...])`. The default recursion limit (128) trips
+// the macro hygiene. 512 is enough for the current schema and headroom
+// for ~10 more tools.
+#![recursion_limit = "512"]
 
 use std::time::Duration;
 

@@ -20,7 +20,8 @@ export type AugmentationId =
   | 'design'
   | 'daimonion'
   | 'three_d'
-  | 'self';
+  | 'self'
+  | 'telegram';
 
 /** Where the aug renders in the chat layout. */
 export type AugPlacement = 'sidecard' | 'overlay' | 'popover' | 'split' | 'modal';
@@ -68,8 +69,9 @@ export interface Augmentation {
   toolTriggers: string[];
   /** Where the aug renders. */
   placement: AugPlacement;
-  /** Svelte component for the card/popover body. */
-  component: ComponentType<SvelteComponent<AugProps>>;
+  /** Svelte component for the card/popover body. Optional — augs that
+   *  only need a header card (most existing augs) leave this null. */
+  body?: ComponentType<SvelteComponent<AugProps>>;
   /** Retention policy after the trigger resolves. */
   retention: AugRetention;
   /** True if the aug can also be opened in a fullscreen viewer

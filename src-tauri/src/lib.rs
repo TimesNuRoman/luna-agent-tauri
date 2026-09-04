@@ -1,4 +1,8 @@
-﻿use std::path::{Path, PathBuf};
+﻿#![recursion_limit = "512"]
+// Bumped from the default 128 to fit the 30+ tool JSON literal in
+// `luna_tools_schema` (serde_json::json! macro hygiene). Headroom for
+// ~10 more tool entries before the next bump.
+use std::path::{Path, PathBuf};
 use tauri::menu::{Menu, MenuItem};
 use tauri::image::Image;
 
@@ -2433,6 +2437,37 @@ fn luna_tools_schema() -> serde_json::Value {
                     "type": "object",
                     "properties": {},
                     "required": []
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "telegram_connect",
+                "description": "Orchestrator for the Telegram bot. Use this instead of calling telegram_set_token / telegram_set_allow_list / telegram_start individually when helping the user set up the bot from chat. Call once with action='checklist' to see the current state and a step-by-step checklist; then drive the user through the missing steps by calling again with action='save_token' (after they paste the @BotFather token), 'save_allow' (after they paste their Telegram user ID, discoverable by sending /start to the bot), and 'start' once token + allow-list are in place. The return value is a single struct with `state`, `current_step`, a 4-item `checklist` (each item has `done` + `instruction`), and a `next_action` hint. Always tell the user what step they're on and what to do next.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["checklist", "save_token", "save_allow", "start", "stop"],
+                            "description": "What to do. 'checklist' is read-only; the others mutate state. 'stop' is also a no-op if the bot isn't running."
+                        },
+                        "token": {
+                            "type": "string",
+                            "description": "Bot token from @BotFather. Required only for action=save_token. Never echoed back to the model after storage."
+                        },
+                        "user_id": {
+                            "type": "integer",
+                            "description": "Single Telegram user ID to add to the allow-list. Use for action=save_allow. The user can discover their ID by sending /start to the bot — the access-denied reply includes it."
+                        },
+                        "user_ids": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "description": "Batch of Telegram user IDs to add. Alternative to `user_id` for action=save_allow."
+                        }
+                    },
+                    "required": ["action"]
                 }
             }
         },
@@ -5137,6 +5172,93 @@ async fn minimax_chat_stream(
                         any_executed = true;
                         continue;
                     }
+                    if name == "telegram_connect" {
+                        let args_val: serde_json::Value = serde_json::from_str(args_str)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        let action = args_val
+                            .get("action")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("checklist")
+                            .to_string();
+                        let token = args_val
+                            .get("token")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string);
+                        let user_id = args_val
+                            .get("user_id")
+                            .and_then(|v| v.as_i64());
+                        let user_ids = args_val
+                            .get("user_ids")
+                            .and_then(|v| v.as_array())
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|x| x.as_i64())
+                                    .collect::<Vec<i64>>()
+                            });
+                        let _ = app.emit(
+                            "ai_tool_use",
+                            serde_json::json!({
+                                "id": id, "name": name,
+                                "args": { "action": &action, "has_token": token.is_some(), "user_id": user_id, "user_ids_len": user_ids.as_ref().map(|v| v.len()) },
+                            }),
+                        );
+                        let result = tg::telegram_connect(
+                            &app,
+                            tg::TelegramConnectArgs {
+                                action: action.clone(),
+                                token,
+                                user_id,
+                                user_ids,
+                            },
+                        );
+                        // Friendly text summary for the LLM.
+                        let mut summary = String::new();
+                        summary.push_str(&format!(
+                            "[telegram_connect] state={}, current_step={}/{}\n",
+                            result.state,
+                            result.current_step + 1,
+                            result.checklist.len()
+                        ));
+                        summary.push_str(&format!("{}\n", result.message));
+                        if let Some(err) = &result.error {
+                            summary.push_str(&format!("Error: {err}\n"));
+                        }
+                        summary.push_str("\nChecklist:\n");
+                        for (i, c) in result.checklist.iter().enumerate() {
+                            let mark = if c.done { "[x]" } else { "[ ]" };
+                            summary.push_str(&format!("  {} {}. {}\n", mark, i + 1, c.label));
+                            if !c.done || i == result.current_step {
+                                summary.push_str(&format!("       -> {}\n", c.instruction));
+                            }
+                        }
+                        if let Some(next) = &result.next_action {
+                            summary.push_str(&format!("\nNext action: telegram_connect action={next}\n"));
+                        }
+                        let tool_msg = serde_json::json!({
+                            "role": "tool",
+                            "tool_call_id": id,
+                            "content": summary,
+                        });
+                        messages.push(tool_msg);
+                        // Emit the structured DTO too so the chat UI can render
+                        // a side-card with the checklist (the aug's component).
+                        let _ = app.emit(
+                            "telegram_connect_result",
+                            serde_json::json!({
+                                "id": id,
+                                "result": &result,
+                            }),
+                        );
+                        let _ = app.emit(
+                            "ai_tool_result",
+                            serde_json::json!({
+                                "id": id, "name": name, "ok": result.error.is_none(),
+                                "error": result.error,
+                            }),
+                        );
+                        any_executed = true;
+                        continue;
+                    }
                 }
                 if !any_executed && tool_calls.iter().all(|t| t.1.is_empty()) {
                     // Nothing to do РІР‚вЂќ bail to avoid infinite loop.
@@ -6724,6 +6846,25 @@ fn start_telegram_bot(
 #[tauri::command]
 fn stop_telegram_bot(app: AppHandle) -> Result<(), String> {
     tg::stop_dispatcher(&app)
+}
+
+#[tauri::command]
+fn telegram_connect(
+    app: AppHandle,
+    action: String,
+    token: Option<String>,
+    user_id: Option<i64>,
+    user_ids: Option<Vec<i64>>,
+) -> tg::TelegramConnectResult {
+    tg::telegram_connect(
+        &app,
+        tg::TelegramConnectArgs {
+            action,
+            token,
+            user_id,
+            user_ids,
+        },
+    )
 }
 
 #[tauri::command]
@@ -9683,6 +9824,7 @@ pub fn run() {
             set_telegram_allow_list,
             start_telegram_bot,
             stop_telegram_bot,
+            telegram_connect,
             // Shell
             run_shell_command,
             get_shell_allow_list,

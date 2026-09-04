@@ -568,6 +568,290 @@ pub fn get_status(app: &AppHandle) -> TelegramStatus {
     }
 }
 
+// =====================================================================
+// Orchestrator: `telegram_connect` (used by both the LLM tool and the
+// chat-side augmentation). The model and the user only ever deal with
+// this single entry point; the underlying set_*/start_/stop_ commands
+// stay as low-level primitives that the orchestrator composes.
+//
+// Actions:
+//   checklist  - return current state + checklist, no side effects
+//   save_token - store token in keyring, return updated checklist
+//   save_allow - merge user_id into allow-list (or replace via user_ids), return checklist
+//   start      - spawn dispatcher if token+allow present, return checklist
+//   stop       - stop dispatcher, return checklist
+// =====================================================================
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelegramConnectArgs {
+    pub action: String,
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub user_id: Option<i64>,
+    #[serde(default)]
+    pub user_ids: Option<Vec<i64>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ChecklistItem {
+    pub key: String,
+    pub done: bool,
+    pub label: String,
+    pub instruction: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TelegramConnectResult {
+    pub state: String, // "no_token" | "token_only" | "ready" | "running"
+    pub running: bool,
+    pub token_set: bool,
+    pub allow_list_size: usize,
+    pub bot_username: Option<String>,
+    pub checklist: Vec<ChecklistItem>,
+    pub current_step: usize,
+    pub message: String,
+    pub next_action: Option<String>,
+    pub error: Option<String>,
+}
+
+fn build_checklist(
+    token_set: bool,
+    allow_list_size: usize,
+    running: bool,
+    bot_username: &Option<String>,
+) -> (Vec<ChecklistItem>, String, usize) {
+    let have_token = ChecklistItem {
+        key: "have_token".into(),
+        done: token_set,
+        label: "Bot token saved".into(),
+        instruction: if token_set {
+            "Token already in keyring.".into()
+        } else {
+            "Create a bot via @BotFather in Telegram (send /newbot, follow prompts, copy the token). Then call telegram_connect with action=save_token and the token in the `token` field.".into()
+        },
+    };
+    let allow_user = ChecklistItem {
+        key: "allow_user".into(),
+        done: allow_list_size > 0,
+        label: "Allow-list populated".into(),
+        instruction: if allow_list_size > 0 {
+            format!("{allow_list_size} user(s) on the allow-list.")
+        } else {
+            "Send /start to the bot — it will reply with your Telegram user ID (the bot rejects anyone not on the list, so the reply also serves as discovery). Then call telegram_connect with action=save_allow and your ID.".into()
+        },
+    };
+    let start_bot = ChecklistItem {
+        key: "start_bot".into(),
+        done: running,
+        label: "Bot running".into(),
+        instruction: if running {
+            let u = bot_username.as_deref().unwrap_or("?");
+            format!("Running as @{u}.")
+        } else if !token_set {
+            "Waiting for token (step 1).".into()
+        } else if allow_list_size == 0 {
+            "Waiting for allow-list (step 2).".into()
+        } else {
+            "Call telegram_connect with action=start to launch the dispatcher.".into()
+        },
+    };
+    let verify = ChecklistItem {
+        key: "verify".into(),
+        done: running,
+        label: "Verified from phone".into(),
+        instruction: if running {
+            "Open a chat with the bot in Telegram, send /start. You should get back your user ID and a short help message.".into()
+        } else {
+            "After start: send /start to the bot from your phone to confirm end-to-end.".into()
+        },
+    };
+    let checklist = vec![have_token, allow_user, start_bot, verify];
+    let state = if running {
+        "running"
+    } else if token_set && allow_list_size > 0 {
+        "ready"
+    } else if token_set {
+        "token_only"
+    } else {
+        "no_token"
+    };
+    let current_step = checklist.iter().position(|c| !c.done).unwrap_or(checklist.len() - 1);
+    let message = match state {
+        "running" => format!(
+            "Telegram bot running as @{}.",
+            bot_username.as_deref().unwrap_or("?")
+        ),
+        "ready" => "Token + allow-list ready. Bot is stopped — call telegram_connect action=start to launch."
+            .to_string(),
+        "token_only" => "Token saved, but no users in the allow-list yet. Send /start to the bot to discover your ID."
+            .to_string(),
+        _ => "Not configured. Create a bot via @BotFather, then call telegram_connect with action=save_token."
+            .to_string(),
+    };
+    (checklist, message, current_step)
+}
+
+pub fn telegram_connect(
+    app: &AppHandle,
+    args: TelegramConnectArgs,
+) -> TelegramConnectResult {
+    let status = get_status(app);
+    let action = args.action.trim().to_lowercase();
+    let mut result = TelegramConnectResult {
+        state: String::new(),
+        running: status.running,
+        token_set: status.token_set,
+        allow_list_size: status.allow_list_size,
+        bot_username: status.bot_username.clone(),
+        checklist: vec![],
+        current_step: 0,
+        message: String::new(),
+        next_action: None,
+        error: None,
+    };
+
+    // Pre-process side-effecting actions first so the returned checklist
+    // reflects post-state, not pre-state.
+    match action.as_str() {
+        "save_token" => {
+            let Some(t) = args.token.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+                result.error = Some("missing or empty `token`".into());
+                let (cl, msg, step) = build_checklist(
+                    result.token_set,
+                    result.allow_list_size,
+                    result.running,
+                    &result.bot_username,
+                );
+                result.checklist = cl;
+                result.message = msg;
+                result.current_step = step;
+                return result;
+            };
+            if let Err(e) = super::super::secrets::set_telegram_token(t) {
+                result.error = Some(e);
+            } else if let Some(st) = app.try_state::<Arc<TelegramState>>() {
+                if let Ok(mut g) = st.token_cached.lock() {
+                    *g = Some(t.to_string());
+                }
+            }
+        }
+        "save_allow" => {
+            let new_ids: Vec<i64> = if let Some(single) = args.user_id {
+                vec![single]
+            } else if let Some(many) = args.user_ids.clone() {
+                many
+            } else {
+                result.error = Some("missing `user_id` (or `user_ids`)".into());
+                let (cl, msg, step) = build_checklist(
+                    result.token_set,
+                    result.allow_list_size,
+                    result.running,
+                    &result.bot_username,
+                );
+                result.checklist = cl;
+                result.message = msg;
+                result.current_step = step;
+                return result;
+            };
+            // Merge into existing allow-list, sanitize, cap at 64.
+            if let Some(st) = app.try_state::<Arc<TelegramState>>() {
+                match st.allow_list.lock() {
+                    Ok(mut g) => {
+                        let mut combined: Vec<i64> = g.clone();
+                        combined.extend(new_ids.iter().copied().filter(|id| *id > 0));
+                        combined.sort_unstable();
+                        combined.dedup();
+                        combined.truncate(64);
+                        *g = combined.clone();
+                        let last_chat = st
+                            .last_known_chat_id
+                            .lock()
+                            .ok()
+                            .and_then(|gc| *gc);
+                        if let Err(e) = write_allow_list_to_disk(&combined, last_chat) {
+                            result.error = Some(e);
+                        }
+                        result.allow_list_size = combined.len();
+                    }
+                    Err(e) => result.error = Some(e.to_string()),
+                }
+            } else {
+                result.error = Some("telegram state unavailable".into());
+            }
+        }
+        "start" => match spawn_dispatcher(app.clone()) {
+            Ok(username) => {
+                result.bot_username = Some(username);
+                result.running = true;
+            }
+            Err(e) => result.error = Some(e),
+        },
+        "stop" => {
+            if let Err(e) = stop_dispatcher(app) {
+                result.error = Some(e);
+            } else {
+                result.running = false;
+            }
+        }
+        "checklist" | "" => { /* pure read */ }
+        other => {
+            result.error = Some(format!(
+                "unknown action '{other}'; expected one of: checklist, save_token, save_allow, start, stop"
+            ));
+        }
+    }
+
+    // Refresh running/token flags after any mutation.
+    if action == "start" || action == "stop" || action == "save_token" {
+        let post = get_status(app);
+        result.running = post.running;
+        result.token_set = post.token_set;
+        result.bot_username = post.bot_username.clone();
+        if let Some(st) = app.try_state::<Arc<TelegramState>>() {
+            if let Ok(g) = st.allow_list.lock() {
+                result.allow_list_size = g.len();
+            }
+        }
+    }
+
+    let (cl, msg, step) = build_checklist(
+        result.token_set,
+        result.allow_list_size,
+        result.running,
+        &result.bot_username,
+    );
+    result.checklist = cl;
+    result.message = msg;
+    result.current_step = step;
+    result.next_action = match result.state.as_str() {
+        // state is set below
+        _ => None,
+    };
+    result.state = if result.running {
+        "running".into()
+    } else if result.token_set && result.allow_list_size > 0 {
+        "ready".into()
+    } else if result.token_set {
+        "token_only".into()
+    } else {
+        "no_token".into()
+    };
+    // Hint to LLM what to call next.
+    result.next_action = if !result.error.is_some() {
+        match result.state.as_str() {
+            "no_token" => Some("save_token".into()),
+            "token_only" => Some("save_allow".into()),
+            "ready" => Some("start".into()),
+            "running" => None,
+            _ => None,
+        }
+    } else {
+        None
+    };
+    result
+}
+
 async fn run_dispatcher(
     bot: teloxide::Bot,
     app: AppHandle,

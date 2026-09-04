@@ -1298,6 +1298,39 @@ export function stopTelegramBot(): Promise<void> {
   return core().invoke<void>('stop_telegram_bot');
 }
 
+// ---------- Telegram connect (orchestrator) ----------
+
+export type TelegramChecklistItem = {
+  key: string;
+  done: boolean;
+  label: string;
+  instruction: string;
+};
+
+export type TelegramConnectResult = {
+  state: 'no_token' | 'token_only' | 'ready' | 'running';
+  running: boolean;
+  token_set: boolean;
+  allow_list_size: number;
+  bot_username: string | null;
+  checklist: TelegramChecklistItem[];
+  current_step: number;
+  message: string;
+  next_action: string | null;
+  error: string | null;
+};
+
+export type TelegramConnectAction = 'checklist' | 'save_token' | 'save_allow' | 'start' | 'stop';
+
+export function telegramConnect(args: {
+  action: TelegramConnectAction;
+  token?: string;
+  user_id?: number;
+  user_ids?: number[];
+}): Promise<TelegramConnectResult> {
+  return core().invoke<TelegramConnectResult>('telegram_connect', args);
+}
+
 // ---------- Shell allow-list ----------
 
 export type ShellAllowListEntry = {

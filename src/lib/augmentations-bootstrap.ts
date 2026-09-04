@@ -5,9 +5,11 @@
 // so every aug is available before the first chat render.
 //
 // Each entry is the minimum descriptor needed for activation +
-// rendering. The actual body of each aug is a thin card (AugCard.svelte);
-// richer per-aug UIs (e.g. Azazel's screenshot timeline) will replace
-// the body in a follow-up — the registration API stays the same.
+// rendering. Augs without a `body` field render as a thin card
+// (icon + label + args). Augs with a `body` host richer per-aug
+// UIs in the chat side-strip (Telegram uses the full TelegramBot
+// form; the rest stay header-only and rely on the fullscreen button
+// for their dedicated panel).
 //
 // Retention policy follows the table from the UX-1 plan:
 //   - memory:     next_message   (collapses after the next user msg)
@@ -17,8 +19,9 @@
 //   - daimonion:  manual         (user dismisses)
 //   - three_d:    manual         (the editor stays open)
 //   - self:       manual         (admin UI)
+//   - telegram:   manual         (admin UI, lives in the chat)
 
-import AugCard from '../AugCard.svelte';
+import TelegramBot from '../TelegramBot.svelte';
 import { register } from './augmentations';
 
 // Re-registration guard: HMR can re-import this module in dev; without
@@ -46,7 +49,6 @@ export function bootstrapAugmentations(): void {
       'memory_stats',
     ],
     placement: 'sidecard',
-    component: AugCard,
     retention: 'next_message',
     fullscreenAvailable: true,
     fullscreenTab: 'memory',
@@ -71,7 +73,6 @@ export function bootstrapAugmentations(): void {
       'browser_done',
     ],
     placement: 'sidecard',
-    component: AugCard,
     retention: 'until_done',
     fullscreenAvailable: true,
     fullscreenTab: 'azazel',
@@ -84,7 +85,6 @@ export function bootstrapAugmentations(): void {
     slashCommands: ['/video', '/screen', '/capture'],
     toolTriggers: ['capture_frame', 'screen_capture', 'video_capture'],
     placement: 'sidecard',
-    component: AugCard,
     retention: 'oneshot',
     fullscreenAvailable: true,
     fullscreenTab: 'video',
@@ -109,7 +109,6 @@ export function bootstrapAugmentations(): void {
       'design_apply',
     ],
     placement: 'sidecard',
-    component: AugCard,
     retention: 'until_done',
     fullscreenAvailable: true,
     fullscreenTab: 'design',
@@ -127,7 +126,6 @@ export function bootstrapAugmentations(): void {
       'daimonion_capture_frame',
     ],
     placement: 'sidecard',
-    component: AugCard,
     retention: 'manual',
     fullscreenAvailable: true,
     fullscreenTab: 'daimonion',
@@ -140,7 +138,6 @@ export function bootstrapAugmentations(): void {
     slashCommands: ['/3d', '/thoughts'],
     toolTriggers: [],
     placement: 'split',
-    component: AugCard,
     retention: 'manual',
     fullscreenAvailable: true,
     fullscreenTab: 'three_d',
@@ -159,9 +156,31 @@ export function bootstrapAugmentations(): void {
       'rollback_self_update',
     ],
     placement: 'sidecard',
-    component: AugCard,
     retention: 'manual',
     fullscreenAvailable: true,
     fullscreenTab: 'self_evolution',
+  });
+
+  register({
+    id: 'telegram',
+    label: 'Telegram Bot',
+    icon: '🤖',
+    slashCommands: ['/telegram', '/tg', '/телеграм', '/bot'],
+    toolTriggers: [
+      'telegram_connect',
+      'telegram_status',
+      'telegram_set_token',
+      'telegram_clear_token',
+      'telegram_set_allow_list',
+      'telegram_start',
+      'telegram_stop',
+    ],
+    placement: 'sidecard',
+    // Full TelegramBot form in the chat side-strip (user chose
+    // "Полный как Settings" — every control in one place).
+    body: TelegramBot,
+    retention: 'manual',
+    fullscreenAvailable: true,
+    fullscreenTab: 'telegram',
   });
 }
