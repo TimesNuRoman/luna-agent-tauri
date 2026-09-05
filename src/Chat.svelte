@@ -5236,76 +5236,7 @@
       {/if}
       </span>
     </div>
-    <div class="input-shell" class:focused={inputFocused} class:has-text={inputText.length > 0} class:disabled={!hasMinimax} class:multitask={multitask} class:busy={busy && mode === 'chat'}>
-      <div class="input-bg"></div>
-      <textarea
-        bind:this={inputEl}
-        bind:value={inputText}
-        on:keydown={onInputKey}
-        on:input={autosize}
-        on:focus={() => (inputFocused = true)}
-        on:blur={() => (inputFocused = false)}
-        placeholder={mode === 'research'
-          ? 'Research — автоподбор. Нажми ↑ или Enter для обновления…'
-          : (hasMinimax
-              ? (multitask
-                  ? '⚡ Multitask: попроси сравнить темы или сгенерить несколько картинок — агент запустит субагентов параллельно…'
-                  : 'Спроси у Луны — она умеет рисовать, если попросить…')
-              : 'Сначала введи MiniMax-ключ в ⚙ Settings…')}
-        rows="1"
-        disabled={mode === 'chat' && !hasMinimax}
-        spellcheck="true"
-        autocomplete="off"
-      ></textarea>
-      <div class="input-actions">
-        <button
-          class="icon-btn multitask-btn"
-          class:on={multitask}
-          disabled={!hasMinimax}
-          on:click={toggleMultitask}
-          title={multitask
-            ? 'Multitask: ON — ассистент будет использовать parallel_research / parallel_generate_images. Клик чтобы выключить.'
-            : 'Multitask: OFF — клик включит параллельный режим для следующего запроса (parallel_research, parallel_generate_images).'}
-          aria-label="Toggle multitask mode"
-          aria-pressed={multitask}
-        >
-          {@html IconSpark()}
-        </button>
-        <button
-          class="icon-btn"
-          class:on={showCredentials}
-          on:click={() => (showCredentials = true)}
-          title="Credentials — slot manager for Azazel logins"
-          aria-label="Manage credentials"
-        >
-          {@html IconKey()}
-        </button>
-        <button
-          class="icon-btn"
-          class:active={voiceState === 'recording'}
-          class:transcribing={voiceState === 'transcribing'}
-          class:error={voiceState === 'error'}
-          on:click={toggleVoice}
-          disabled={voiceState === 'transcribing' || !hasMinimax}
-          title={voiceState === 'recording' ? 'Остановить запись (Ctrl+Space)' : 'Голосовой ввод (Ctrl+Space)'}
-          aria-label="Toggle voice input"
-        >
-          {#if voiceState === 'recording'}<span class="rec-dot"></span>{:else if voiceState === 'transcribing'}<span class="spinner"></span>{:else}{@html IconMic()}{/if}
-        </button>
-        <button
-          class="send-btn"
-          class:active={(mode === 'chat' ? (inputText.trim().length > 0 && hasMinimax) : (!researchLoading && userInterests.length > 0))}
-          on:click={send}
-          disabled={mode === 'chat' ? (!inputText.trim() || !hasMinimax) : (researchLoading || userInterests.length === 0)}
-          title={busy && mode === 'chat' ? 'Отменить текущий ответ и отправить новое сообщение' : (mode === 'research' ? 'Обновить исследование' : 'Отправить (Enter)')}
-          aria-label="Send"
-        >
-          {#if busy && mode === 'chat'}{@html IconStop()}{:else}{@html IconSend()}{/if}
-        </button>
-      </div>
-    </div>
     <div class="hint" class:focused={inputFocused}>
-      {#if voiceError}<span class="voice-err">{@html IconMic()} {voiceError}</span>{/if}
       {#if multitask}
         <button
           type="button"
