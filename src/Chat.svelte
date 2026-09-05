@@ -5249,7 +5249,13 @@
                   <div class="context-content-empty">Контекст пуст — отправьте первое сообщение, и здесь появится его полный текст.</div>
                 {/if}
               </div>
-              <div class="context-content-foot">Клик по блоку — прокрутка к сообщению в чате. <kbd>⧉</kbd> копирует один блок, «📋 Всё» — весь контекст. Системный промпт формируется в Rust, его размер показан приблизительно (≈600 токенов).</div>
+              <div class="context-content-foot">
+                <span>Клик по блоку — прокрутка к сообщению в чате.</span>
+                <kbd>{@html IconCopy()}</kbd>
+                <span>копирует один блок,</span>
+                <span class="foot-copy">{@html IconCopy()}<span>Всё</span></span>
+                <span>— весь контекст. Системный промпт формируется в Rust, его размер показан приблизительно (≈600 токенов).</span>
+              </div>
             </div>
           {/if}
           <div class="context-pop-actions">
@@ -7114,6 +7120,12 @@
     z-index: 100;
     color: #cfd3da;
     font-size: 12px;
+    transform-origin: bottom left;
+    animation: context-pop-in 140ms cubic-bezier(0.2, 0.9, 0.3, 1.1);
+  }
+  @keyframes context-pop-in {
+    from { opacity: 0; transform: translateY(4px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0)   scale(1); }
   }
   .context-pop-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
   .context-pop-title { font-weight: 600; color: #e6e8eb; font-size: 12px; }
@@ -7306,16 +7318,32 @@
     color: #6c7280;
     padding-top: 6px;
     border-top: 1px solid rgba(255, 255, 255, 0.06);
-    line-height: 1.4;
+    line-height: 1.55;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
   }
   .context-content-foot code {
     font-family: ui-monospace, 'Cascadia Code', Menlo, monospace;
     font-size: 10px;
     background: rgba(255, 255, 255, 0.05);
-    padding: 1px 4px;
+    padding: 2px 5px;
     border-radius: 3px;
     color: #b6bcc7;
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
   }
+  .context-content-foot code svg { width: 10px; height: 10px; display: block; }
+  .context-content-foot .foot-copy {
+    display: inline-flex; align-items: center; gap: 3px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 3px;
+    padding: 1px 5px;
+    color: #b6bcc7;
+  }
+  .context-content-foot .foot-copy svg { width: 10px; height: 10px; }
   .context-content-list::-webkit-scrollbar,
   .context-content-text::-webkit-scrollbar { width: 6px; height: 6px; }
   .context-content-list::-webkit-scrollbar-thumb,
