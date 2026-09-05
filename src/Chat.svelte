@@ -93,6 +93,14 @@
     iconMedia as IconMedia,
     iconPlan as IconPlan,
     iconTrash as IconTrash,
+    iconChatNew as IconChatNew,
+    iconMic as IconMic,
+    iconSpark as IconSpark,
+    iconKey as IconKey,
+    iconSend as IconSend,
+    iconStop as IconStop,
+    iconVolume as IconVolume,
+    iconVolumeMute as IconVolumeMute,
   } from './lib/icons';
   // Phase UX-1 — chat-side augmentations. Each aug (Memory, Azazel,
   // Video, Design, Daimonion, 3D, Self) registers itself with the
@@ -426,16 +434,47 @@
   // the fly and route the body to the `m.thinking` field, which the
   // UI renders in a separate collapsible block.
   function stripThinkingTags(s: string): { text: string; thinking: string } {
-    const re = /<think>([\s\S]*?)<\/think>/gi;
+    // Tolerant to whitespace inside the tag (`<think>`, `< think>`,
+    // `< /think>`, `< / think >`) because M3's tokenizer occasionally
+    // inserts a space right after `<`. We match `<` + optional space +
+    // `think` + optional space + `>`, and same for the closing tag.
+    const openRe = /<\s*think\s*>/gi;
+    const closeRe = /<\s*\/\s*think\s*>/gi;
+    const pairRe = /<\s*think\s*>([\s\S]*?)<\s*\/\s*think\s*>/gi;
     let thinking = '';
-    const text = s.replace(re, (_m, body: string) => {
+    const text = s.replace(pairRe, (_m, body: string) => {
       thinking += (thinking ? '\n\n' : '') + body.trim();
       return '';
     });
-    // Drop any orphan tags the model may have emitted as leftovers
-    // (e.g. when the stream cut mid-block).
-    const cleaned = text.replace(/<\/?think\s*\/?>/gi, '').trimStart();
+    // Drop any orphan open/close tags the model may have emitted as
+    // leftovers (e.g. when the stream cut mid-block).
+    const cleaned = text.replace(openRe, '').replace(closeRe, '').trimStart();
     return { text: cleaned, thinking };
+  }
+
+  /** Phase UX-3: when a chat is loaded from `chats.json` we may end
+   *  up with assistant messages whose `html` field still contains a
+   *  raw `<think>…</think>` (or `< think>…</think>`) block — the
+   *  tags were written to disk before the strip-on-stream logic
+   *  landed. We re-strip here, populate `thinking` so the user gets
+   *  the proper think-block UI, and re-render `html` so the visible
+   *  prose no longer shows the literal tags. The result is
+   *  idempotent: if the message has already been migrated, the
+   *  regex finds nothing and nothing changes. */
+  function normalizeLoadedMessage(m: typeof messages[number]): typeof messages[number] {
+    if (m.role !== 'assistant') return m;
+    if (m.kind === 'image' || m.kind === 'file_read' || m.kind === 'file_edit' || m.kind === 'summary') return m;
+    const raw = m.raw || m.html || '';
+    if (!raw) return m;
+    if (!/<\s*\/?\s*think\s*>/i.test(raw)) return m;
+    const { text, thinking } = stripThinkingTags(raw);
+    const html = renderMarkdown(text);
+    return {
+      ...m,
+      raw: text,
+      html,
+      thinking: thinking ? (m.thinking ? `${m.thinking}\n\n${thinking}` : thinking) : m.thinking,
+    };
   }
 
   // ---- typewriter ----
@@ -2890,7 +2929,9 @@
       clearStreaming(oldChatId);
       busy = false;
       chatId = full.id;
-      messages = full.messages as typeof messages;
+      // Phase UX-3: migrate persisted `<think>` tags out of `m.html`
+      // into `m.thinking` so the user sees the proper think-block.
+      messages = (full.messages as typeof messages).map(normalizeLoadedMessage);
       loadedFromDisk = true;
       history = [];
       // Drop any plan links to the previous chat — those were
@@ -3830,7 +3871,11 @@
         const full = await loadChat(id);
         if (full && Array.isArray(full.messages) && full.messages.length > 0) {
           chatId = full.id;
-          messages = full.messages as typeof messages;
+          // Phase UX-3: migrate any persisted `<think>` tags that
+          // landed in `m.html` before the strip-on-stream logic
+          // existed. Idempotent — already-clean messages are
+          // returned untouched.
+          messages = (full.messages as typeof messages).map(normalizeLoadedMessage);
           // Skip the auto-intro below — we already have content.
           loadedFromDisk = true;
         }
@@ -4853,111 +4898,47 @@
 
   <!-- Footer composer is only rendered outside Code mode. The Code-mode
        input lives inside the center column (see `cc-input-wrap` above) so
-       the user gets one consistent textarea regardless of mode. -->
+       the user gets one consistent textarea regardless of mode.
+       Phase UX-5: redesign — single top toolbar (chat history + model
+       picker) + 32-px icon button row inside the input shell. All
+       glyphs are proprietary SVGs from src/lib/icons.ts. -->
   {#if mode !== 'code'}
   <footer class="composer">
-    <div class="chat-history-bar" role="toolbar" aria-label="История чатов">
-      <button
-        type="button"
-        class="hist-btn"
-        on:click={startNewChat}
-        title="Начать новый чат (текущий будет сохранён в историю)"
-        aria-label="Начать новый чат"
-      >
-        <span aria-hidden="true">🆕</span>
-        <span>Новый чат</span>
-      </button>
-      <button
-        type="button"
-        class="hist-btn danger"
-        on:click={nukeAllChats}
-        title="Удалить всю историю (необратимо)"
-        aria-label="Очистить всю историю"
-      >
-        <span aria-hidden="true">🗑</span>
-        <span>Очистить</span>
-      </button>
-      <span class="hist-status" class:saving={chatSaving} aria-live="polite">
-        {#if chatSaving}💾 Сохранение…{:else if chatId}💾 История включена{/if}
-      </span>
-    </div>
-    <div class="input-shell" class:focused={inputFocused} class:has-text={inputText.length > 0} class:disabled={!hasMinimax} class:multitask={multitask} class:busy={busy && mode === 'chat'}>
-      <div class="input-bg"></div>
-      <textarea
-        bind:this={inputEl}
-        bind:value={inputText}
-        on:keydown={onInputKey}
-        on:input={autosize}
-        on:focus={() => (inputFocused = true)}
-        on:blur={() => (inputFocused = false)}
-        placeholder={mode === 'research'
-          ? 'Research — автоподбор. Нажми ↑ или Enter для обновления…'
-          : (hasMinimax
-              ? (multitask
-                  ? '⚡ Multitask: попроси сравнить темы или сгенерить несколько картинок — агент запустит субагентов параллельно…'
-                  : 'Спроси у Луны — она умеет рисовать, если попросить…')
-              : 'Сначала введи MiniMax-ключ в ⚙ Settings…')}
-        rows="1"
-        disabled={mode === 'chat' && !hasMinimax}
-        spellcheck="true"
-        autocomplete="off"
-      ></textarea>
-      <div class="input-actions">
+    <div class="composer-top" role="toolbar" aria-label="История чатов и модель">
+      <div class="chat-history-bar">
         <button
-          class="icon-btn multitask-btn"
-          class:on={multitask}
-          disabled={!hasMinimax}
-          on:click={toggleMultitask}
-          title={multitask
-            ? 'Multitask: ON — ассистент будет использовать parallel_research / parallel_generate_images. Клик чтобы выключить.'
-            : 'Multitask: OFF — клик включит параллельный режим для следующего запроса (parallel_research, parallel_generate_images).'}
-          aria-label="Toggle multitask mode"
-          aria-pressed={multitask}
+          type="button"
+          class="hist-btn"
+          on:click={startNewChat}
+          title="Начать новый чат (текущий будет сохранён в историю)"
+          aria-label="Начать новый чат"
         >
-          <span class="multitask-glyph" aria-hidden="true">⚡</span>
+          {@html IconChatNew()}
+          <span>Новый</span>
         </button>
-        <button class="icon-btn" disabled={!hasMinimax} title="Агент сам нарисует, если попросить" aria-label="Image hint" on:click={() => inputEl?.focus()}>🎨</button>
-        <button class="icon-btn" class:on={showCredentials} on:click={() => (showCredentials = true)} title="Credentials — slot manager for Azazel logins" aria-label="Manage credentials">
-          🔑
+        <button
+          type="button"
+          class="hist-btn danger"
+          on:click={nukeAllChats}
+          title="Удалить всю историю (необратимо)"
+          aria-label="Очистить всю историю"
+        >
+          {@html IconTrash()}
+          <span>Очистить</span>
         </button>
-        <button class="icon-btn" class:active={voiceState === 'recording'} class:transcribing={voiceState === 'transcribing'} class:error={voiceState === 'error'} on:click={toggleVoice} disabled={voiceState === 'transcribing' || !hasMinimax} title={voiceState === 'recording' ? 'Остановить запись (Ctrl+Space)' : 'Голосовой ввод (Ctrl+Space)'} aria-label="Toggle voice input">
-          {#if voiceState === 'recording'}<span class="rec-dot"></span>{:else if voiceState === 'transcribing'}<span class="spinner"></span>{:else}🎙{/if}
-        </button>
-        <button class="send-btn" class:active={(mode === 'chat' ? (inputText.trim().length > 0 && hasMinimax) : (!researchLoading && userInterests.length > 0))} on:click={send} disabled={mode === 'chat' ? (!inputText.trim() || !hasMinimax) : (researchLoading || userInterests.length === 0)} title={busy && mode === 'chat' ? 'Отменить текущий ответ и отправить новое сообщение' : (mode === 'research' ? 'Обновить исследование' : 'Отправить (Enter)')} aria-label="Send">
-          {#if busy && mode === 'chat'}
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>
-          {:else}
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-          {/if}
-        </button>
+        <span class="hist-status" class:saving={chatSaving} aria-live="polite">
+          {#if chatSaving}💾 Сохранение…{:else if chatId}💾{/if}
+        </span>
       </div>
-    </div>
-    <div class="hint" class:focused={inputFocused}>
-      {#if voiceError}<span class="voice-err">🎙 {voiceError}</span>{/if}
-      {#if multitask}
-        <button
-          type="button"
-          class="hint-pill multitask-pill"
-          on:click={toggleMultitask}
-          title="Multitask включён — клик чтобы выключить"
-          aria-label="Disable multitask mode"
-        >⚡ Multitask</button>
-      {/if}
-      <span class="hint-pill model-pill">MiniMax</span>
-      <span class="hint-pill model-pill">{selectedModel.label}</span>
-      {#if busy && mode === 'chat'}
-        <button
-          type="button"
-          class="busy-pill"
-          on:click={cancelCurrent}
-          title="Остановить текущий ответ (или просто нажми Enter с новым сообщением)"
-          aria-label="Остановить ответ"
-        >
-          <span class="busy-spinner" aria-hidden="true"></span>
-          <span>печатает…</span>
-          <span class="busy-stop" aria-hidden="true">✕</span>
-        </button>
-      {/if}
+      <label class="composer-model" title="Выбор модели MiniMax">
+        <span class="composer-model-label">model</span>
+        <select bind:value={selectedModelId} on:change={onModelChange}>
+          {#each MODELS as m (m.id)}
+            <option value={m.id}>{m.label}</option>
+          {/each}
+        </select>
+        <span class="composer-model-caret" aria-hidden="true">▾</span>
+      </label>
       <span class="context-wrap">
         <button
           type="button"
@@ -5183,16 +5164,106 @@
         </div>
       {/if}
       </span>
+    </div>
+    <div class="input-shell" class:focused={inputFocused} class:has-text={inputText.length > 0} class:disabled={!hasMinimax} class:multitask={multitask} class:busy={busy && mode === 'chat'}>
+      <div class="input-bg"></div>
+      <textarea
+        bind:this={inputEl}
+        bind:value={inputText}
+        on:keydown={onInputKey}
+        on:input={autosize}
+        on:focus={() => (inputFocused = true)}
+        on:blur={() => (inputFocused = false)}
+        placeholder={mode === 'research'
+          ? 'Research — автоподбор. Нажми ↑ или Enter для обновления…'
+          : (hasMinimax
+              ? (multitask
+                  ? '⚡ Multitask: попроси сравнить темы или сгенерить несколько картинок — агент запустит субагентов параллельно…'
+                  : 'Спроси у Луны — она умеет рисовать, если попросить…')
+              : 'Сначала введи MiniMax-ключ в ⚙ Settings…')}
+        rows="1"
+        disabled={mode === 'chat' && !hasMinimax}
+        spellcheck="true"
+        autocomplete="off"
+      ></textarea>
+      <div class="input-actions">
+        <button
+          class="icon-btn multitask-btn"
+          class:on={multitask}
+          disabled={!hasMinimax}
+          on:click={toggleMultitask}
+          title={multitask
+            ? 'Multitask: ON — ассистент будет использовать parallel_research / parallel_generate_images. Клик чтобы выключить.'
+            : 'Multitask: OFF — клик включит параллельный режим для следующего запроса (parallel_research, parallel_generate_images).'}
+          aria-label="Toggle multitask mode"
+          aria-pressed={multitask}
+        >
+          {@html IconSpark()}
+        </button>
+        <button
+          class="icon-btn"
+          class:on={showCredentials}
+          on:click={() => (showCredentials = true)}
+          title="Credentials — slot manager for Azazel logins"
+          aria-label="Manage credentials"
+        >
+          {@html IconKey()}
+        </button>
+        <button
+          class="icon-btn"
+          class:active={voiceState === 'recording'}
+          class:transcribing={voiceState === 'transcribing'}
+          class:error={voiceState === 'error'}
+          on:click={toggleVoice}
+          disabled={voiceState === 'transcribing' || !hasMinimax}
+          title={voiceState === 'recording' ? 'Остановить запись (Ctrl+Space)' : 'Голосовой ввод (Ctrl+Space)'}
+          aria-label="Toggle voice input"
+        >
+          {#if voiceState === 'recording'}<span class="rec-dot"></span>{:else if voiceState === 'transcribing'}<span class="spinner"></span>{:else}{@html IconMic()}{/if}
+        </button>
+        <button
+          class="send-btn"
+          class:active={(mode === 'chat' ? (inputText.trim().length > 0 && hasMinimax) : (!researchLoading && userInterests.length > 0))}
+          on:click={send}
+          disabled={mode === 'chat' ? (!inputText.trim() || !hasMinimax) : (researchLoading || userInterests.length === 0)}
+          title={busy && mode === 'chat' ? 'Отменить текущий ответ и отправить новое сообщение' : (mode === 'research' ? 'Обновить исследование' : 'Отправить (Enter)')}
+          aria-label="Send"
+        >
+          {#if busy && mode === 'chat'}{@html IconStop()}{:else}{@html IconSend()}{/if}
+        </button>
+      </div>
+    </div>
+    <div class="hint" class:focused={inputFocused}>
+      {#if voiceError}<span class="voice-err">{@html IconMic()} {voiceError}</span>{/if}
+      {#if multitask}
+        <button
+          type="button"
+          class="hint-pill multitask-pill"
+          on:click={toggleMultitask}
+          title="Multitask включён — клик чтобы выключить"
+          aria-label="Disable multitask mode"
+        >{@html IconSpark()} Multitask</button>
+      {/if}
+      {#if busy && mode === 'chat'}
+        <button
+          type="button"
+          class="busy-pill"
+          on:click={cancelCurrent}
+          title="Остановить текущий ответ (или просто нажми Enter с новым сообщением)"
+          aria-label="Остановить ответ"
+        >
+          <span class="busy-spinner" aria-hidden="true"></span>
+          <span>печатает…</span>
+          <span class="busy-stop" aria-hidden="true">✕</span>
+        </button>
+      {/if}
       <span class="hint-spacer"></span>
       <span class="hint-keys">
-        <kbd>Enter</kbd> отправить
-        {#if busy && mode === 'chat'}
-          <span class="hint-sep">·</span>
-          <span class="hint-steer">Enter во время ответа — отменит и пошлёт новое</span>
-        {:else}
-          <span class="hint-sep">·</span>
-          <kbd>Shift</kbd>+<kbd>Enter</kbd> перенос
-        {/if}
+        <kbd>Enter</kbd>
+        <span class="hint-sep">отправить</span>
+        <span class="hint-sep">·</span>
+        <kbd>Shift</kbd>+<kbd>Enter</kbd>
+        <span class="hint-sep">перенос</span>
       </span>
     </div>
 
@@ -6715,7 +6786,31 @@
 
   .error { margin: 0 16px 8px; padding: 8px 12px; background: rgba(224,122,122,0.1); border: 1px solid #5a3030; border-radius: 6px; color: #f5b56b; font-size: 12px; }
 
-  .composer { flex: 0 0 auto; padding: 12px 16px 14px; background: linear-gradient(to top, rgba(15, 18, 23, 0.96), rgba(15, 18, 23, 0.6) 60%, transparent); }
+  .composer { flex: 0 0 auto; padding: 10px 16px 12px; background: linear-gradient(to top, rgba(15, 18, 23, 0.96), rgba(15, 18, 23, 0.6) 60%, transparent); }
+  .composer-top {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 8px; padding: 0 4px;
+  }
+  .composer-model {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    padding: 2px 4px 2px 10px;
+    font: inherit; font-size: 11px;
+    color: var(--text, #b6bcc7);
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  .composer-model:hover { background: rgba(201, 160, 160, 0.10); border-color: rgba(201, 160, 160, 0.30); }
+  .composer-model-label { color: #6c7280; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .composer-model select {
+    background: transparent; border: 0; color: var(--text, #cfd3da);
+    font: inherit; font-size: 11px; outline: 0; padding: 2px 4px;
+    appearance: none; -webkit-appearance: none; cursor: pointer;
+  }
+  .composer-model select option { background: #1a1c20; color: #e6e8eb; }
+  .composer-model-caret { color: #6c7280; font-size: 9px; margin-right: 4px; pointer-events: none; }
 
   /* ---- plan-mode composer ---- */
   .plan-composer { padding-top: 8px; }
@@ -6818,7 +6913,7 @@
   }
   :global(html:not(.theme-dark)) .hist-btn:hover { background: rgba(176, 120, 120, 0.10); color: #1a1c20; border-color: rgba(176, 120, 120, 0.35); }
   :global(html:not(.theme-dark)) .hist-status { color: #8a8f97; }
-  .input-shell { position: relative; display: flex; align-items: flex-end; gap: 6px; padding: 6px 6px 6px 14px; background: rgba(28, 31, 38, 0.7); border: 1px solid rgba(201, 160, 160, 0.18); border-radius: 18px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 6px 22px rgba(0, 0, 0, 0.3); transition: border-color 200ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 240ms cubic-bezier(0.16, 1, 0.3, 1), background 200ms ease, transform 200ms ease; overflow: hidden; }
+  .input-shell { position: relative; display: flex; align-items: flex-end; gap: 4px; padding: 4px 4px 4px 14px; background: rgba(28, 31, 38, 0.7); border: 1px solid rgba(201, 160, 160, 0.18); border-radius: 16px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 6px 22px rgba(0, 0, 0, 0.3); transition: border-color 200ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 240ms cubic-bezier(0.16, 1, 0.3, 1), background 200ms ease, transform 200ms ease; overflow: hidden; }
   .input-bg { position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(168, 85, 247, 0.08), rgba(236, 72, 153, 0.06)); opacity: 0; transition: opacity 240ms ease; pointer-events: none; }
   .input-shell.focused { border-color: rgba(201, 160, 160, 0.55); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 0 0 4px rgba(201, 160, 160, 0.10), 0 0 28px rgba(201, 160, 160, 0.18), 0 8px 28px rgba(0, 0, 0, 0.35); background: rgba(28, 31, 38, 0.92); }
   .input-shell.focused .input-bg { opacity: 1; }
@@ -6831,7 +6926,7 @@
   .input-shell textarea::-webkit-scrollbar { width: 6px; }
   .input-shell textarea::-webkit-scrollbar-thumb { background: #2c313a; border-radius: 3px; }
   .input-actions { display: flex; align-items: center; gap: 4px; padding-bottom: 2px; }
-  .icon-btn { width: 36px; height: 36px; border-radius: 50%; border: 0; background: transparent; color: #8a93a6; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; transition: background 160ms ease, color 160ms ease, transform 160ms ease; position: relative; }
+  .icon-btn { width: 32px; height: 32px; border-radius: 50%; border: 0; background: transparent; color: #8a93a6; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; transition: background 160ms ease, color 160ms ease, transform 160ms ease; position: relative; }
   .icon-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); color: #cfd3da; }
   .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   .icon-btn.active { background: rgba(208, 64, 64, 0.18); color: #ff8a8a; animation: vpulse 1.2s ease-in-out infinite; }
@@ -6864,7 +6959,7 @@
   .rec-dot { width: 12px; height: 12px; border-radius: 50%; background: #ff6060; box-shadow: 0 0 10px rgba(255, 80, 80, 0.6); }
   .spinner { width: 14px; height: 14px; border: 2px solid rgba(255, 200, 138, 0.3); border-top-color: #ffc88a; border-radius: 50%; animation: spin 0.7s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .send-btn { width: 36px; height: 36px; border-radius: 50%; border: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #6c7280; background: rgba(255, 255, 255, 0.04); transition: background 200ms ease, color 200ms ease, transform 160ms ease, box-shadow 200ms ease; }
+  .send-btn { width: 32px; height: 32px; border-radius: 50%; border: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #6c7280; background: rgba(255, 255, 255, 0.04); transition: background 200ms ease, color 200ms ease, transform 160ms ease, box-shadow 200ms ease; }
   .send-btn:hover:not(:disabled) { transform: scale(1.05); }
   .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .send-btn.active { color: #050509; background: linear-gradient(135deg, #f0d6c4 0%, #c9a0a0 50%, #a87a7a 100%); box-shadow: 0 4px 16px rgba(201, 160, 160, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.4); }
