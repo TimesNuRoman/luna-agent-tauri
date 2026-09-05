@@ -4904,7 +4904,7 @@
        glyphs are proprietary SVGs from src/lib/icons.ts. -->
   {#if mode !== 'code'}
   <footer class="composer">
-    <div class="composer-top" role="toolbar" aria-label="История чатов и модель">
+    <div class="composer-top" role="toolbar" aria-label="История чатов">
       <div class="chat-history-bar">
         <button
           type="button"
@@ -4930,6 +4930,77 @@
           {#if chatSaving}💾 Сохранение…{:else if chatId}💾{/if}
         </span>
       </div>
+    </div>
+    <div class="input-shell" class:focused={inputFocused} class:has-text={inputText.length > 0} class:disabled={!hasMinimax} class:multitask={multitask} class:busy={busy && mode === 'chat'}>
+      <div class="input-bg"></div>
+      <textarea
+        bind:this={inputEl}
+        bind:value={inputText}
+        on:keydown={onInputKey}
+        on:input={autosize}
+        on:focus={() => (inputFocused = true)}
+        on:blur={() => (inputFocused = false)}
+        placeholder={mode === 'research'
+          ? 'Research — автоподбор. Нажми ↑ или Enter для обновления…'
+          : (hasMinimax
+              ? (multitask
+                  ? '⚡ Multitask: попроси сравнить темы или сгенерить несколько картинок — агент запустит субагентов параллельно…'
+                  : 'Спроси у Луны — она умеет рисовать, если попросить…')
+              : 'Сначала введи MiniMax-ключ в ⚙ Settings…')}
+        rows="1"
+        disabled={mode === 'chat' && !hasMinimax}
+        spellcheck="true"
+        autocomplete="off"
+      ></textarea>
+      <div class="input-actions">
+        <button
+          class="icon-btn multitask-btn"
+          class:on={multitask}
+          disabled={!hasMinimax}
+          on:click={toggleMultitask}
+          title={multitask
+            ? 'Multitask: ON — ассистент будет использовать parallel_research / parallel_generate_images. Клик чтобы выключить.'
+            : 'Multitask: OFF — клик включит параллельный режим для следующего запроса (parallel_research, parallel_generate_images).'}
+          aria-label="Toggle multitask mode"
+          aria-pressed={multitask}
+        >
+          {@html IconSpark()}
+        </button>
+        <button
+          class="icon-btn"
+          class:on={showCredentials}
+          on:click={() => (showCredentials = true)}
+          title="Credentials — slot manager for Azazel logins"
+          aria-label="Manage credentials"
+        >
+          {@html IconKey()}
+        </button>
+        <button
+          class="icon-btn"
+          class:active={voiceState === 'recording'}
+          class:transcribing={voiceState === 'transcribing'}
+          class:error={voiceState === 'error'}
+          on:click={toggleVoice}
+          disabled={voiceState === 'transcribing' || !hasMinimax}
+          title={voiceState === 'recording' ? 'Остановить запись (Ctrl+Space)' : 'Голосовой ввод (Ctrl+Space)'}
+          aria-label="Toggle voice input"
+        >
+          {#if voiceState === 'recording'}<span class="rec-dot"></span>{:else if voiceState === 'transcribing'}<span class="spinner"></span>{:else}{@html IconMic()}{/if}
+        </button>
+        <button
+          class="send-btn"
+          class:active={(mode === 'chat' ? (inputText.trim().length > 0 && hasMinimax) : (!researchLoading && userInterests.length > 0))}
+          on:click={send}
+          disabled={mode === 'chat' ? (!inputText.trim() || !hasMinimax) : (researchLoading || userInterests.length === 0)}
+          title={busy && mode === 'chat' ? 'Отменить текущий ответ и отправить новое сообщение' : (mode === 'research' ? 'Обновить исследование' : 'Отправить (Enter)')}
+          aria-label="Send"
+        >
+          {#if busy && mode === 'chat'}{@html IconStop()}{:else}{@html IconSend()}{/if}
+        </button>
+      </div>
+    </div>
+    <div class="composer-meta">
+      {#if voiceError}<span class="voice-err">{@html IconMic()} {voiceError}</span>{/if}
       <label class="composer-model" title="Выбор модели MiniMax">
         <span class="composer-model-label">model</span>
         <select bind:value={selectedModelId} on:change={onModelChange}>
@@ -6788,15 +6859,24 @@
 
   .composer { flex: 0 0 auto; padding: 10px 16px 12px; background: linear-gradient(to top, rgba(15, 18, 23, 0.96), rgba(15, 18, 23, 0.6) 60%, transparent); }
   .composer-top {
-    display: flex; align-items: center; justify-content: space-between;
+    display: flex; align-items: center;
     gap: 12px; margin-bottom: 8px; padding: 0 4px;
+  }
+  /* Bottom-left cluster: model picker + context gauge + voice error.
+     Sits as a sibling of the input shell, visually grouped with
+     the keyboard-hint row so the whole "footer" reads as one band. */
+  .composer-meta {
+    display: flex; align-items: center; gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px; padding: 0 6px;
+    font-size: 11px;
   }
   .composer-model {
     display: inline-flex; align-items: center; gap: 6px;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 999px;
-    padding: 2px 4px 2px 10px;
+    padding: 1px 4px 1px 9px;
     font: inherit; font-size: 11px;
     color: var(--text, #b6bcc7);
     cursor: pointer;
