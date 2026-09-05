@@ -1140,9 +1140,13 @@
     return 'low';
   }
   function formatTokens(n: number): string {
-    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-    if (n >= 10_000) return (n / 1000).toFixed(0) + 'K';
-    if (n >= 1_000) return (n / 1000).toFixed(1) + 'K';
+    // No rounding jump on the 1K / 10K / 1M boundaries — the
+    // display length stays stable across the crossover so the
+    // bar/count row doesn't shift width mid-conversation.
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(2).replace(/\.?0+$/, '') + 'M';
+    if (n >= 100_000)  return Math.round(n / 1000) + 'K';
+    if (n >= 10_000)   return (n / 1000).toFixed(1) + 'K';
+    if (n >= 1_000)    return (n / 1000).toFixed(2).replace(/\.?0+$/, '') + 'K';
     return String(n);
   }
   function clearContext() {
@@ -5090,7 +5094,25 @@
             <span class="context-pop-title">Контекст</span>
             <span class="context-pop-model">{selectedModel.label}</span>
           </div>
-          <div class="context-tabs" role="tablist">
+          <div
+            class="context-tabs"
+            role="tablist"
+            on:keydown={(e) => {
+              if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                e.preventDefault();
+                setContextView('content');
+              } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                setContextView('summary');
+              } else if (e.key === 'Home') {
+                e.preventDefault();
+                setContextView('summary');
+              } else if (e.key === 'End') {
+                e.preventDefault();
+                setContextView('content');
+              }
+            }}
+          >
             <button
               type="button"
               role="tab"
@@ -5107,7 +5129,7 @@
               class:active={contextView === 'content'}
               on:click={() => setContextView('content')}
               title="Показать то, что реально уходит в модель"
-            >{@html IconList()}<span>Содержимое</span> <span class="context-tab-count">{realContext.length}</span></button>
+            >{@html IconList()}<span>Содержимое</span>{#if realContext.length > 0} <span class="context-tab-count">{realContext.length}</span>{/if}</button>
           </div>
 
           <!-- Pinned / attached files in the active context window.
@@ -5174,11 +5196,13 @@
               <span class="context-bar-pct">{contextInfo.pct}%</span>
             </div>
             <div class="context-numbers">
-              <span><b>{formatTokens(contextInfo.used)}</b> использовано</span>
-              <span class="context-numbers-sep">/</span>
-              <span><b>{formatTokens(contextInfo.window)}</b> окно</span>
+              <span class="context-numbers-primary">
+                <b>{formatTokens(contextInfo.used)}</b>
+                <span class="context-numbers-of">из</span>
+                <b>{formatTokens(contextInfo.window)}</b>
+              </span>
               <span class="context-numbers-sep">·</span>
-              <span class="context-remaining">осталось <b>{formatTokens(Math.max(0, contextInfo.window - contextInfo.used))}</b></span>
+              <span class="context-remaining">свободно <b>{formatTokens(Math.max(0, contextInfo.window - contextInfo.used))}</b></span>
             </div>
 
             <div class="context-bd-title">По типам</div>
@@ -5199,9 +5223,9 @@
             <div class="context-cost" title="Оценка по публичным тарифам MiniMax; выход считается только по последним ответам ассистента">
               <span class="context-cost-label">≈ ${costEstimate.total.toFixed(4)}</span>
               <span class="context-cost-sep">·</span>
-              <span class="context-cost-sub">in ${costEstimate.in.toFixed(4)}</span>
+              <span class="context-cost-sub">вход ${costEstimate.in.toFixed(4)}</span>
               <span class="context-cost-sep">·</span>
-              <span class="context-cost-sub">out ${costEstimate.out.toFixed(4)}</span>
+              <span class="context-cost-sub">выход ${costEstimate.out.toFixed(4)}</span>
             </div>
 
             <div class="context-bd-title">Последние сообщения</div>
@@ -7164,6 +7188,8 @@
   .context-bar-pct { font-family: ui-monospace, 'Cascadia Code', Menlo, monospace; font-size: 11px; min-width: 38px; text-align: right; color: #b6bcc7; }
   .context-numbers { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #8a93a6; margin-bottom: 10px; }
   .context-numbers b { color: #cfd3da; font-weight: 600; font-family: ui-monospace, 'Cascadia Code', Menlo, monospace; }
+  .context-numbers-primary { display: inline-flex; align-items: baseline; gap: 4px; }
+  .context-numbers-of { color: #6c7280; font-size: 10px; text-transform: lowercase; padding: 0 2px; }
   .context-numbers-sep { color: #3a414b; }
   .context-breakdown { display: flex; flex-direction: column; gap: 2px; max-height: 140px; overflow-y: auto; margin-bottom: 10px; padding: 4px 0; border-top: 1px solid rgba(255, 255, 255, 0.06); border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
   .context-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 10px; line-height: 1.3; }
