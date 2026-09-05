@@ -5246,7 +5246,11 @@
                   </div>
                 {/each}
                 {#if realContext.length === 0}
-                  <div class="context-content-empty">Контекст пуст — отправьте первое сообщение, и здесь появится его полный текст.</div>
+                  <div class="context-content-empty">
+                    <span class="context-content-empty-icon">{@html IconList()}</span>
+                    <span class="context-content-empty-title">Контекст пуст</span>
+                    <span class="context-content-empty-sub">Отправьте первое сообщение — здесь появится полный текст того, что уйдёт в модель.</span>
+                  </div>
                 {/if}
               </div>
               <div class="context-content-foot">
@@ -6327,6 +6331,7 @@
     display: inline-flex; align-items: center; justify-content: center;
   }
   .ctx-files-add:hover { background: rgba(74, 111, 207, 0.12); color: #4a6fcf; }
+  .ctx-files-add:focus-visible { outline: 2px solid rgba(74, 111, 207, 0.55); outline-offset: 1px; }
   .ctx-files-add.inline { width: 18px; height: 18px; font-size: 12px; }
   .ctx-files-empty {
     display: flex; align-items: center; justify-content: space-between;
@@ -7212,6 +7217,7 @@
     display: inline-flex; align-items: center; justify-content: center; gap: 5px;
     transition: background 0.12s, color 0.12s;
   }
+  .context-tab:focus-visible { outline: 2px solid rgba(201, 160, 160, 0.55); outline-offset: 1px; }
   .context-tab svg { width: 14px; height: 14px; opacity: 0.85; }
   .context-tab:hover { color: #cfd3da; background: rgba(255, 255, 255, 0.04); }
   .context-tab.active { background: rgba(255, 255, 255, 0.10); color: #e6e8eb; }
@@ -7307,12 +7313,19 @@
   }
   .context-content-item.system .context-content-text { color: #c8d0e0; }
   .context-content-empty {
-    padding: 18px 10px;
+    padding: 22px 14px;
     text-align: center;
     color: #6c7280;
     font-size: 11px;
-    font-style: italic;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
   }
+  .context-content-empty-icon { color: #6c7280; opacity: 0.6; display: inline-flex; }
+  .context-content-empty-icon svg { width: 22px; height: 22px; display: block; }
+  .context-content-empty-title { color: #b6bcc7; font-size: 12px; font-weight: 500; }
+  .context-content-empty-sub { color: #6c7280; line-height: 1.4; max-width: 220px; }
+  :global(html:not(.theme-dark)) .context-content-empty-icon { opacity: 0.5; }
+  :global(html:not(.theme-dark)) .context-content-empty-title { color: #4a3e34; }
+  :global(html:not(.theme-dark)) .context-content-empty-sub { color: #8a7a68; }
   .context-content-foot {
     font-size: 10px;
     color: #6c7280;
