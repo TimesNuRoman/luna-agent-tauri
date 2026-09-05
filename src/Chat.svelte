@@ -114,6 +114,7 @@
     iconRefresh as IconRefresh,
     iconClose as IconClose,
     iconChevronRight as IconChevronRight,
+    iconPlus as IconPlus,
   } from './lib/icons';
   // Phase UX-1 — chat-side augmentations. Each aug (Memory, Azazel,
   // Video, Design, Daimonion, 3D, Self) registers itself with the
@@ -267,8 +268,26 @@
   // Debounced auto-save: every change to `messages` schedules a save
   // ~600 ms later. Streaming chunks during model output get coalesced
   // into a single write so the disk doesn't churn.
-  $: if (loadedFromDisk || chatId) {
+  //
+  // The condition used to be `loadedFromDisk || chatId` — but that's
+  // a chicken-and-egg: a brand-new chat has neither, so the save
+  // never fires and the chat never gets a real id from Rust. The
+  // Rust side already filters out system-only messages in
+  // `persistChat`, so we extend the condition with "has any
+  // non-system message" — i.e. the user typed something or the
+  // model streamed a chunk.
+  $: if (loadedFromDisk || chatId || hasRealMessages(messages)) {
     scheduleChatSave(messages);
+  }
+
+  /** True if `msgs` has at least one message that should hit disk.
+   *  Used by the auto-save reactive to avoid gating on `chatId`,
+   *  which doesn't exist yet for a fresh chat. */
+  function hasRealMessages(msgs: typeof messages): boolean {
+    for (const m of msgs) {
+      if (m.role !== 'system') return true;
+    }
+    return false;
   }
 
   function scheduleChatSave(msgs: typeof messages) {
