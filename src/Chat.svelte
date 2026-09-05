@@ -101,6 +101,19 @@
     iconStop as IconStop,
     iconVolume as IconVolume,
     iconVolumeMute as IconVolumeMute,
+    iconChart as IconChart,
+    iconList as IconList,
+    iconPaperclip as IconPaperclip,
+    iconFile as IconFile,
+    iconEdit as IconEdit,
+    iconAlert as IconAlert,
+    iconSparkle as IconSparkle,
+    iconReturn as IconReturn,
+    iconCopy as IconCopy,
+    iconScroll as IconScroll,
+    iconRefresh as IconRefresh,
+    iconClose as IconClose,
+    iconChevronRight as IconChevronRight,
   } from './lib/icons';
   // Phase UX-1 — chat-side augmentations. Each aug (Memory, Azazel,
   // Video, Design, Daimonion, 3D, Self) registers itself with the
@@ -5049,7 +5062,7 @@
               class="context-tab"
               class:active={contextView === 'summary'}
               on:click={() => (contextView = 'summary')}
-            >📊 Сводка</button>
+            >{@html IconChart()}<span>Сводка</span></button>
             <button
               type="button"
               role="tab"
@@ -5058,31 +5071,31 @@
               class:active={contextView === 'content'}
               on:click={() => (contextView = 'content')}
               title="Показать то, что реально уходит в модель"
-            >📝 Содержимое <span class="context-tab-count">{realContext.length}</span></button>
+            >{@html IconList()}<span>Содержимое</span> <span class="context-tab-count">{realContext.length}</span></button>
           </div>
 
-          <!-- Phase UX-3: pinned / attached files in the active
-               context window. Toggling × hides the file from the
-               gauge and from `buildRealContext`; the chat card stays.
-               This is purely a context-window bookkeeping action,
+          <!-- Pinned / attached files in the active context window.
+               Toggling the close icon removes the file from the
+               gauge and from `buildRealContext`; the chat card
+               stays. Purely a context-window bookkeeping action,
                NOT a security control. -->
-          {#if filesInContext.length > 0}
-            <div class="ctx-files">
-              <div class="ctx-files-head">
-                <span class="ctx-files-title">📎 Файлы в контексте</span>
-                <span class="ctx-files-count">{filesInContext.length}</span>
-                <button
-                  class="ctx-files-add"
-                  type="button"
-                  on:click={openAttachPicker}
-                  title="Прикрепить файл из workspace"
-                  aria-label="Прикрепить файл"
-                >+</button>
-              </div>
+          <div class="ctx-files">
+            <div class="ctx-files-head">
+              <span class="ctx-files-title">{@html IconPaperclip()}<span>Файлы в контексте</span></span>
+              <span class="ctx-files-count">{filesInContext.length}</span>
+              <button
+                class="ctx-files-add"
+                type="button"
+                on:click={openAttachPicker}
+                title="Прикрепить файл из workspace"
+                aria-label="Прикрепить файл"
+              >+</button>
+            </div>
+            {#if filesInContext.length > 0}
               <ul class="ctx-files-list">
                 {#each filesInContext as f (f.msgId)}
                   <li class="ctx-file" class:excluded={f.excludeFromContext}>
-                    <span class="ctx-file-icon">{f.kind === 'file_edit' ? '✎' : '📄'}</span>
+                    <span class="ctx-file-icon">{@html f.kind === 'file_edit' ? IconEdit() : IconFile()}</span>
                     <span class="ctx-file-name" title={f.path}>{f.path}</span>
                     <span class="ctx-file-size">{formatBytes(f.bytes)}{f.lines ? ` · ${f.lines} строк` : ''}</span>
                     <button
@@ -5091,28 +5104,28 @@
                       on:click={() => toggleExcludeFromContext(f.msgId)}
                       title={f.excludeFromContext ? 'Вернуть в контекст' : 'Исключить из контекста (временно)'}
                       aria-label={f.excludeFromContext ? 'Вернуть в контекст' : 'Исключить'}
-                    >{f.excludeFromContext ? '↩' : '×'}</button>
+                    >{@html f.excludeFromContext ? IconReturn() : IconClose()}</button>
                   </li>
                 {/each}
               </ul>
-            </div>
-          {:else}
-            <div class="ctx-files-empty">
-              <span>📎 Нет прикреплённых файлов</span>
-              <button class="ctx-files-add inline" type="button" on:click={openAttachPicker} title="Прикрепить файл из workspace">+</button>
-            </div>
-          {/if}
+            {:else}
+              <div class="ctx-files-empty">
+                <span>Нет прикреплённых файлов</span>
+                <button class="ctx-files-add inline" type="button" on:click={openAttachPicker} title="Прикрепить файл из workspace">{@html IconPlus()}</button>
+              </div>
+            {/if}
+          </div>
 
-          <!-- Phase UX-3: when the gauge crosses 80%, suggest
-               summarising instead of letting the user discover the
-               button on their own. We never auto-execute — the
-               decision stays with the user because summary cards
-               are not currently restorable. -->
+          <!-- When the gauge crosses 80%, suggest summarising instead
+               of letting the user discover the button. Never auto-
+               execute — the decision stays with the user because
+               summary cards are not currently restorable. -->
           {#if contextInfo.pct >= 80 && messages.length >= 8}
             <div class="ctx-suggest">
-              <span>⚠ Контекст заполнен на <b>{contextInfo.pct}%</b> — рекомендуется сжать старые сообщения.</span>
+              <span class="ctx-suggest-icon">{@html IconAlert()}</span>
+              <span class="ctx-suggest-text">Контекст заполнен на <b>{contextInfo.pct}%</b> — рекомендуется сжать старые сообщения.</span>
               <button class="ctx-suggest-btn" type="button" on:click={summariseOlder} disabled={summariseBusy}>
-                {summariseBusy ? '⏳ Сжимаю…' : '✨ Сжать сейчас'}
+                {summariseBusy ? 'Сжимаю…' : 'Сжать сейчас'}
               </button>
             </div>
           {/if}
@@ -5182,7 +5195,7 @@
                   class:err={contextCopyHint.startsWith('✕')}
                   on:click={copyRealContext}
                   title="Скопировать весь видимый контекст в буфер обмена"
-                >{contextCopyHint || '📋 Всё'}</button>
+                >{@html IconCopy()}<span>Всё</span></button>
               </div>
               <div class="context-content-list">
                 {#each realContext as it (it.id)}
@@ -5208,7 +5221,7 @@
                         on:click|stopPropagation={() => copyContextItem(it)}
                         title="Скопировать этот блок"
                         aria-label="Скопировать"
-                      >{contextItemCopied === it.id ? '✓' : '⧉'}</button>
+                      >{@html contextItemCopied === it.id ? '✓' : IconCopy()}</button>
                     </div>
                     <pre class="context-content-text">{it.content}</pre>
                   </div>
@@ -5221,16 +5234,28 @@
             </div>
           {/if}
           <div class="context-pop-actions">
-            <button class="context-action primary" on:click={() => { contextPopover = false; startNewChat(); }} title="Начать новый чат (текущий сохранится в историю)" type="button">🆕 Новый чат</button>
-            <button
-              class="context-action"
-              on:click={summariseOlder}
-              disabled={busy || summariseBusy || messages.length < 8}
-              title="Свернуть старые сообщения в summary (экономит контекст)"
-              type="button"
-            >{summariseBusy ? '⏳ Сжимаю…' : '📜 Сжать чат'}</button>
-            <button class="context-action" on:click={clearContext} title="Очистить контекст в текущем чате" type="button">↺ Очистить</button>
-            <span class="context-hint">Esc — закрыть · оценка приблизительная</span>
+            <div class="context-action-group">
+              <button
+                class="context-action primary"
+                type="button"
+                on:click={() => { contextPopover = false; startNewChat(); }}
+                title="Начать новый чат (текущий сохранится в историю)"
+              >{@html IconChatNew()}<span>Новый чат</span></button>
+              <button
+                class="context-action"
+                type="button"
+                on:click={summariseOlder}
+                disabled={busy || summariseBusy || messages.length < 8}
+                title="Свернуть старые сообщения в summary (экономит контекст)"
+              >{@html IconScroll()}<span>{summariseBusy ? 'Сжимаю…' : 'Сжать'}</span></button>
+              <button
+                class="context-action"
+                type="button"
+                on:click={clearContext}
+                title="Очистить контекст в текущем чате"
+              >{@html IconRefresh()}<span>Очистить</span></button>
+            </div>
+            <span class="context-hint">Esc — закрыть</span>
           </div>
         </div>
       {/if}
@@ -6341,7 +6366,12 @@
     font-size: 11.5px;
     color: #f5b56b;
   }
+  .ctx-suggest-icon { flex-shrink: 0; display: inline-flex; }
+  .ctx-suggest-icon svg { width: 14px; height: 14px; display: block; }
+  .ctx-suggest-text { flex: 1; min-width: 0; line-height: 1.4; }
+  .ctx-suggest-text b { color: #f5d8a8; font-weight: 600; }
   .ctx-suggest-btn {
+    display: inline-flex; align-items: center; gap: 5px;
     border: 0;
     background: #c9a0a0;
     color: #1c1f26;
@@ -6353,6 +6383,7 @@
     margin-left: auto;
     flex-shrink: 0;
   }
+  .ctx-suggest-btn svg { width: 12px; height: 12px; }
   .ctx-suggest-btn:hover:not(:disabled) { background: #d8b0b0; }
   .ctx-suggest-btn:disabled { opacity: 0.5; cursor: wait; }
 
@@ -7054,12 +7085,13 @@
     bottom: calc(100% + 6px);
     left: 0;
     z-index: 50;
-    width: 320px;
+    width: 360px;
+    max-width: calc(100vw - 24px);
     background: #16191f;
     border: 1px solid #2c313a;
-    border-radius: 10px;
+    border-radius: 12px;
     padding: 12px 14px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
     z-index: 100;
     color: #cfd3da;
     font-size: 12px;
@@ -7087,12 +7119,30 @@
   .context-row-preview { flex: 1; color: #8a93a6; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
   .context-row-tokens { flex: 0 0 auto; color: #b6bcc7; font-family: ui-monospace, 'Cascadia Code', Menlo, monospace; }
   .context-row-more { color: #6c7280; justify-content: center; padding: 4px 0; }
-  .context-pop-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .context-action { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.10); border-radius: 6px; color: #cfd3da; font-size: 11px; padding: 4px 10px; cursor: pointer; font-family: inherit; }
-  .context-action:hover { background: rgba(216, 138, 138, 0.12); border-color: rgba(216, 138, 138, 0.35); color: #f0c9c9; }
+  .context-pop-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+  .context-action-group { display: flex; flex: 1; gap: 4px; min-width: 0; }
+  .context-action {
+    flex: 1;
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 6px;
+    color: #cfd3da;
+    font-size: 11px;
+    padding: 5px 6px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .context-action svg { width: 12px; height: 12px; opacity: 0.9; flex-shrink: 0; }
+  .context-action span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .context-action:hover { background: rgba(201, 160, 160, 0.12); border-color: rgba(201, 160, 160, 0.35); color: #f0c9c9; }
   .context-action.primary { background: rgba(176, 120, 120, 0.18); border-color: rgba(176, 120, 120, 0.45); color: #f5d8d8; }
   .context-action.primary:hover { background: rgba(176, 120, 120, 0.30); color: #fff; }
-  .context-hint { color: #6c7280; font-size: 10px; font-style: italic; }
+  .context-action:disabled { opacity: 0.4; cursor: not-allowed; }
+  .context-hint { color: #6c7280; font-size: 10px; white-space: nowrap; }
 
   /* ---- context popover: breakdown by kind ---- */
   .context-bd-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: #6c7280; margin: 8px 0 4px; }
@@ -7131,6 +7181,7 @@
     display: inline-flex; align-items: center; justify-content: center; gap: 5px;
     transition: background 0.12s, color 0.12s;
   }
+  .context-tab svg { width: 14px; height: 14px; opacity: 0.85; }
   .context-tab:hover { color: #cfd3da; background: rgba(255, 255, 255, 0.04); }
   .context-tab.active { background: rgba(255, 255, 255, 0.10); color: #e6e8eb; }
   .context-tab-count {

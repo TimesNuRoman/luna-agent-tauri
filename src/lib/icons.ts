@@ -303,3 +303,83 @@ export const iconVolumeMute = (): string => svg(
   `<path d="M4 9v6h4l5 4V5L8 9H4z"/>` +
   `<path d="M16 10l4 4M20 10l-4 4"/>`
 );
+
+// ---- context menu (chat composer status popover) ----
+//
+// Slightly tighter design than the mode tabs — they live in a
+// 320-360px popover, so the stroke weight stays at 1.5–1.6 instead
+// of 1.7 to read cleaner at small sizes.
+
+/** Bar chart — "Сводка" tab. Three ascending bars with a baseline.
+ *  Reads instantly as "stats / summary". */
+export const iconChart = (): string => svg(
+  `<path d="M4 20V4"/>` +
+  `<path d="M4 20h16"/>` +
+  `<path d="M7 16V12M11 16V8M15 16V13M19 16V6"/>`,
+  'Сводка'
+);
+
+/** List with bullets — "Содержимое" tab. The clipped variant of
+ *  the generic tasks list. */
+export const iconList = (): string => svg(
+  `<path d="M4 6h12M4 12h12M4 18h8"/>` +
+  `<circle cx="2.5" cy="6" r="0.8" fill="currentColor"/>` +
+  `<circle cx="2.5" cy="12" r="0.8" fill="currentColor"/>` +
+  `<circle cx="2.5" cy="18" r="0.8" fill="currentColor"/>`
+);
+
+/** Paperclip — "Файлы в контексте" header. */
+export const iconPaperclip = (): string => svg(
+  `<path d="M16 7l-7.5 7.5a3.5 3.5 0 0 0 5 5L19 14a5 5 0 0 0-7-7l-8 8a1 1 0 0 0 1.4 1.4l7.5-7.5"/>`,
+  'Файлы'
+);
+
+/** Document with folded corner — generic file_read. */
+export const iconFile = (): string => svg(
+  `<path d="M6 3h8l5 5v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>` +
+  `<path d="M14 3v5h5"/>` +
+  `<path d="M8 13h8M8 17h6"/>`
+);
+
+/** Pencil — file_edit kind. */
+export const iconEdit = (): string => svg(
+  `<path d="M4 20l3-1 11-11-2-2L5 17l-1 3z"/>` +
+  `<path d="M14 6l4 4"/>`
+);
+
+/** Alert triangle — context warning. */
+export const iconAlert = (): string => svg(
+  `<path d="M12 4l9 16H3L12 4z"/>` +
+  `<path d="M12 10v4M12 17.5v.01"/>`
+);
+
+/** Sparkles — "Сжать" suggest. Three-pointed star. */
+export const iconSparkle = (): string => svg(
+  `<path d="M12 3l1.6 5.4L19 10l-5.4 1.6L12 17l-1.6-5.4L5 10l5.4-1.6L12 3z"/>` +
+  `<path d="M19 17l.7 2L21 20l-2 .3L17 21l.7-2L17 17l2 .7zM5 4l.5 1.5L7 6l-1.5 .5L5 7l-.5-1.5L3 5l1.5-.5L5 4z"/>`
+);
+
+/** Return / undo — restore a previously excluded file. */
+export const iconReturn = (): string => svg(
+  `<path d="M9 14L4 9l5-5"/>` +
+  `<path d="M4 9h10a6 6 0 0 1 6 6v1"/>`
+);
+
+/** Copy — clipboard-style square. */
+export const iconCopy = (): string => svg(
+  `<rect x="8" y="4" width="12" height="14" rx="2"/>` +
+  `<path d="M16 18v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/>`
+);
+
+/** Scroll — "Сжать чат" (older-messages summary) action. */
+export const iconScroll = (): string => svg(
+  `<path d="M5 6V4h14v2"/>` +
+  `<path d="M5 18v2h14v-2"/>` +
+  `<path d="M9 12h6"/>` +
+  `<path d="M9 9l-3 3 3 3M15 9l3 3-3 3"/>`
+);
+
+/** Chevron-right — "expand / see all" affordance. */
+export const iconChevronRight = (): string => svg(
+  `<path d="M9 6l6 6-6 6"/>`
+);
