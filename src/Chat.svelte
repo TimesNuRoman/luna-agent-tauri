@@ -1080,7 +1080,12 @@
     return Math.max(1, Math.round(t));
   }
   let contextPopover = false;
-  let contextView: 'summary' | 'content' = 'summary';
+  let contextView: 'summary' | 'content' = (() => {
+    try {
+      const v = localStorage.getItem('luna.chat.contextTab');
+      return v === 'content' ? 'content' : 'summary';
+    } catch { return 'summary'; }
+  })();
   // Refs for the outside-click detector. Without these, the popover
   // would either close on every click (broken `on:blur` race) or
   // refuse to close at all. `<svelte:window>` does the heavy lifting.
@@ -1596,7 +1601,10 @@
   $: costEstimate = (() => { void realContext; return estimateCost(); })();
   function toggleContextPopover() {
     contextPopover = !contextPopover;
-    if (contextPopover) contextView = 'summary';
+  }
+  function setContextView(v: 'summary' | 'content') {
+    contextView = v;
+    try { localStorage.setItem('luna.chat.contextTab', v); } catch { /* ignore */ }
   }
   function onWindowClick(e: MouseEvent) {
     if (!contextPopover) return;
@@ -1607,6 +1615,15 @@
     contextPopover = false;
   }
   function onWindowKey(e: KeyboardEvent) {
+    // Ctrl/Cmd+Shift+K toggles the context popover from anywhere.
+    // Bound to a single key chord so it doesn't fight any existing
+    // shortcut (Ctrl+Shift+C is the dev-tools colour-picker on
+    // Chromium, Ctrl+Shift+I is the dev panel; K is free).
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'K' || e.key === 'k')) {
+      e.preventDefault();
+      toggleContextPopover();
+      return;
+    }
     if (!contextPopover) return;
     if (e.key === 'Escape') {
       contextPopover = false;
@@ -5080,7 +5097,7 @@
               aria-selected={contextView === 'summary'}
               class="context-tab"
               class:active={contextView === 'summary'}
-              on:click={() => (contextView = 'summary')}
+              on:click={() => setContextView('summary')}
             >{@html IconChart()}<span>Сводка</span></button>
             <button
               type="button"
@@ -5088,7 +5105,7 @@
               aria-selected={contextView === 'content'}
               class="context-tab"
               class:active={contextView === 'content'}
-              on:click={() => (contextView = 'content')}
+              on:click={() => setContextView('content')}
               title="Показать то, что реально уходит в модель"
             >{@html IconList()}<span>Содержимое</span> <span class="context-tab-count">{realContext.length}</span></button>
           </div>
@@ -5284,7 +5301,9 @@
                 title="Очистить контекст в текущем чате"
               >{@html IconRefresh()}<span>Очистить</span></button>
             </div>
-            <span class="context-hint">Esc — закрыть</span>
+            <span class="context-hint">
+              <kbd>Esc</kbd> закрыть · <kbd>Ctrl+Shift+K</kbd> открыть
+            </span>
           </div>
         </div>
       {/if}
@@ -7178,7 +7197,18 @@
   .context-action.primary { background: rgba(176, 120, 120, 0.18); border-color: rgba(176, 120, 120, 0.45); color: #f5d8d8; }
   .context-action.primary:hover { background: rgba(176, 120, 120, 0.30); color: #fff; }
   .context-action:disabled { opacity: 0.4; cursor: not-allowed; }
-  .context-hint { color: #6c7280; font-size: 10px; white-space: nowrap; }
+  .context-hint { color: #6c7280; font-size: 10px; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+  .context-hint kbd {
+    display: inline-block;
+    padding: 0 4px;
+    font-family: ui-monospace, 'Cascadia Code', Menlo, monospace;
+    font-size: 9px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+    color: #b6bcc7;
+    line-height: 1.4;
+  }
 
   /* ---- context popover: breakdown by kind ---- */
   .context-bd-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: #6c7280; margin: 8px 0 4px; }
