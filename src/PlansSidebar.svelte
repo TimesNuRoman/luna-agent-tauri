@@ -685,4 +685,19 @@
     font-family: inherit;
   }
   .ps-clear:hover { border-color: #b03030; color: #b03030; }
+
+
+  /* ---- PlansSidebar light theme ---- */
+  :global(html:not(.theme-dark)) .plans-sidebar { background: rgba(242,238,232,0.95); border-right-color: rgba(176,160,140,0.2); }
+  :global(html:not(.theme-dark)) .plans-header { border-bottom-color: rgba(176,160,140,0.2); }
+  :global(html:not(.theme-dark)) .plans-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .plans-search { background: rgba(255,255,255,0.8); border-color: rgba(176,160,140,0.3); color: #1a1c20; }
+  :global(html:not(.theme-dark)) .plans-item { color: #5a6068; border-bottom-color: rgba(176,160,140,0.1); }
+  :global(html:not(.theme-dark)) .plans-item:hover { background: rgba(176,120,120,0.05); color: #1a1c20; }
+  :global(html:not(.theme-dark)) .plans-item.active { background: rgba(176,120,120,0.1); color: #8a4848; border-left-color: #8a4848; }
+  :global(html:not(.theme-dark)) .plans-item-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .plans-item-meta { color: #8a8f97; }
+  :global(html:not(.theme-dark)) .plans-empty { color: #8a8f97; }
+  :global(html:not(.theme-dark)) .plans-btn { background: rgba(255,255,255,0.7); border-color: rgba(176,160,140,0.3); color: #5a6068; }
+
 </style>

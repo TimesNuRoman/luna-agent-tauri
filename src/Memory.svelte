@@ -616,4 +616,24 @@
     letter-spacing: 0.4px;
   }
   .entity-table tr:last-child td { border-bottom: 0; }
+
+
+  /* ---- Memory light theme ---- */
+  :global(html:not(.theme-dark)) .mem-header { background: rgba(242,238,232,0.9); border-bottom-color: rgba(176,160,140,0.25); }
+  :global(html:not(.theme-dark)) .mem-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .mem-subtitle { color: #5a6068; }
+  :global(html:not(.theme-dark)) .mem-btn { background: rgba(255,255,255,0.7); border-color: rgba(176,160,140,0.3); color: #5a6068; }
+  :global(html:not(.theme-dark)) .mem-btn:hover { background: rgba(176,120,120,0.08); border-color: rgba(176,120,120,0.4); color: #8a4848; }
+  :global(html:not(.theme-dark)) .mem-btn.primary { background: rgba(176,120,120,0.85); border-color: transparent; color: #fff; }
+  :global(html:not(.theme-dark)) .mem-search { background: rgba(255,255,255,0.8); border-color: rgba(176,160,140,0.3); color: #1a1c20; }
+  :global(html:not(.theme-dark)) .mem-card { background: rgba(242,238,232,0.9); border-color: rgba(176,160,140,0.25); }
+  :global(html:not(.theme-dark)) .mem-card:hover { border-color: rgba(176,120,120,0.4); }
+  :global(html:not(.theme-dark)) .mem-card-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .mem-card-meta { color: #8a8f97; }
+  :global(html:not(.theme-dark)) .mem-card-preview { color: #5a6068; }
+  :global(html:not(.theme-dark)) .mem-tag { background: rgba(176,120,120,0.08); border-color: rgba(176,120,120,0.25); color: #8a4848; }
+  :global(html:not(.theme-dark)) .mem-empty { color: #8a8f97; }
+  :global(html:not(.theme-dark)) .mem-layer { background: rgba(242,238,232,0.8); border-color: rgba(176,160,140,0.2); color: #5a6068; }
+  :global(html:not(.theme-dark)) .mem-layer.active { background: rgba(176,120,120,0.1); border-color: rgba(176,120,120,0.4); color: #8a4848; }
+
 </style>

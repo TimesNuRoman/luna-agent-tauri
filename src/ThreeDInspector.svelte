@@ -215,4 +215,13 @@
   .hint { color: #6c7280; font-size: 10px; margin-top: 4px; }
   button.primary { background: #4a78c8; color: white; border: 1px solid #4a78c8; border-radius: 4px; cursor: pointer; }
   button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+
+  /* ---- ThreeDInspector light theme ---- */
+  :global(html:not(.theme-dark)) .tdi-panel { background: rgba(242,238,232,0.95); border-left-color: rgba(176,160,140,0.2); }
+  :global(html:not(.theme-dark)) .tdi-title { color: #1a1c20; border-bottom-color: rgba(176,160,140,0.2); }
+  :global(html:not(.theme-dark)) .tdi-prop-label { color: #5a6068; }
+  :global(html:not(.theme-dark)) .tdi-prop-value { color: #1a1c20; background: rgba(255,255,255,0.6); border-color: rgba(176,160,140,0.2); }
+  :global(html:not(.theme-dark)) .tdi-section-title { color: #8a8f97; border-bottom-color: rgba(176,160,140,0.15); }
+
 </style>

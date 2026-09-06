@@ -641,4 +641,21 @@
   .hint .text { flex: 1; }
   .hint .meta { color: #6c7280; font-size: 11px; }
   .muted { color: #6c7280; font-size: 13px; margin: 4px 0; }
+
+
+  /* ---- VideoMode light theme ---- */
+  :global(html:not(.theme-dark)) .vm-header { background: rgba(242,238,232,0.9); border-bottom-color: rgba(176,160,140,0.25); }
+  :global(html:not(.theme-dark)) .vm-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .vm-subtitle { color: #5a6068; }
+  :global(html:not(.theme-dark)) .vm-preview { background: rgba(236,232,224,0.8); border-color: rgba(176,160,140,0.25); }
+  :global(html:not(.theme-dark)) .vm-canvas { background: #e8e4dc; }
+  :global(html:not(.theme-dark)) .vm-btn { background: rgba(255,255,255,0.7); border-color: rgba(176,160,140,0.3); color: #5a6068; }
+  :global(html:not(.theme-dark)) .vm-btn:hover { background: rgba(176,120,120,0.08); border-color: rgba(176,120,120,0.4); color: #8a4848; }
+  :global(html:not(.theme-dark)) .vm-btn.start { background: rgba(176,120,120,0.85); border-color: transparent; color: #fff; }
+  :global(html:not(.theme-dark)) .vm-btn.stop { background: rgba(216,122,122,0.85); border-color: transparent; color: #fff; }
+  :global(html:not(.theme-dark)) .vm-status { color: #5a6068; }
+  :global(html:not(.theme-dark)) .vm-hint { background: rgba(242,238,232,0.9); border-color: rgba(176,160,140,0.25); }
+  :global(html:not(.theme-dark)) .vm-hint-text { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .vm-monitor-select { background: rgba(255,255,255,0.8); border-color: rgba(176,160,140,0.3); color: #1a1c20; }
+
 </style>

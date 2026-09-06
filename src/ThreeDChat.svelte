@@ -499,4 +499,15 @@ If the user asks for a real human face or a copyrighted character, refuse briefl
   .composer input:disabled { opacity: 0.5; }
   button.primary { background: #4a78c8; color: white; border: 1px solid #4a78c8; border-radius: 4px; padding: 4px 12px; cursor: pointer; }
   button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+
+  /* ---- ThreeDChat light theme ---- */
+  :global(html:not(.theme-dark)) .tdc-header { background: rgba(242,238,232,0.9); border-bottom-color: rgba(176,160,140,0.25); }
+  :global(html:not(.theme-dark)) .tdc-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .tdc-msg { background: rgba(242,238,232,0.9); border-color: rgba(176,160,140,0.25); }
+  :global(html:not(.theme-dark)) .tdc-msg.user { background: rgba(176,120,120,0.08); border-color: rgba(176,120,120,0.25); }
+  :global(html:not(.theme-dark)) .tdc-msg-text { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .tdc-input { background: rgba(255,255,255,0.8); border-color: rgba(176,160,140,0.3); color: #1a1c20; }
+  :global(html:not(.theme-dark)) .tdc-btn { background: rgba(176,120,120,0.85); border-color: transparent; color: #fff; }
+
 </style>

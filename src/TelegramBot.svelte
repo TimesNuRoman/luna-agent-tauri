@@ -241,4 +241,20 @@
     color: var(--text-muted); line-height: 1.7;
     white-space: pre; overflow-x: auto;
   }
+
+
+  /* ---- TelegramBot light theme ---- */
+  :global(html:not(.theme-dark)) .tg-header { background: rgba(242,238,232,0.9); border-bottom-color: rgba(176,160,140,0.25); }
+  :global(html:not(.theme-dark)) .tg-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .tg-subtitle { color: #5a6068; }
+  :global(html:not(.theme-dark)) .tg-status { color: #5a6068; }
+  :global(html:not(.theme-dark)) .tg-status.connected { color: #2f6a45; }
+  :global(html:not(.theme-dark)) .tg-btn { background: rgba(255,255,255,0.7); border-color: rgba(176,160,140,0.3); color: #5a6068; }
+  :global(html:not(.theme-dark)) .tg-btn:hover { background: rgba(176,120,120,0.08); border-color: rgba(176,120,120,0.4); color: #8a4848; }
+  :global(html:not(.theme-dark)) .tg-btn.start { background: rgba(94,146,114,0.85); border-color: transparent; color: #fff; }
+  :global(html:not(.theme-dark)) .tg-input { background: rgba(255,255,255,0.8); border-color: rgba(176,160,140,0.3); color: #1a1c20; }
+  :global(html:not(.theme-dark)) .tg-log { background: rgba(242,238,232,0.6); border-color: rgba(176,160,140,0.2); }
+  :global(html:not(.theme-dark)) .tg-log-entry { color: #5a6068; border-bottom-color: rgba(176,160,140,0.08); }
+  :global(html:not(.theme-dark)) .tg-cmd { background: rgba(242,238,232,0.9); border-color: rgba(176,160,140,0.25); color: #1a1c20; }
+
 </style>

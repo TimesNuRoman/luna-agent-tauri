@@ -230,4 +230,14 @@
     z-index: 10;
   }
   .toast.error { color: #f09090; border-color: #8a3a3a; }
+
+
+  /* ---- ThreeD light theme ---- */
+  :global(html:not(.theme-dark)) .td-header { background: rgba(242,238,232,0.9); border-bottom-color: rgba(176,160,140,0.25); }
+  :global(html:not(.theme-dark)) .td-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .td-subtitle { color: #5a6068; }
+  :global(html:not(.theme-dark)) .td-viewport { background: #e8e4dc; }
+  :global(html:not(.theme-dark)) .td-btn { background: rgba(255,255,255,0.7); border-color: rgba(176,160,140,0.3); color: #5a6068; }
+  :global(html:not(.theme-dark)) .td-btn:hover { background: rgba(176,120,120,0.08); border-color: rgba(176,120,120,0.4); color: #8a4848; }
+
 </style>

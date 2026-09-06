@@ -318,4 +318,19 @@
   .turn-assistant .role { color: #c60; }
   .role { font-weight: 600; min-width: 64px; }
   footer { font-size: 11px; color: #888; }
+
+
+  /* ---- Daimonion light theme ---- */
+  :global(html:not(.theme-dark)) .daim-header { background: rgba(242,238,232,0.9); border-bottom-color: rgba(176,160,140,0.25); }
+  :global(html:not(.theme-dark)) .daim-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .daim-subtitle { color: #5a6068; }
+  :global(html:not(.theme-dark)) .daim-btn { background: rgba(255,255,255,0.7); border-color: rgba(176,160,140,0.3); color: #5a6068; }
+  :global(html:not(.theme-dark)) .daim-btn:hover { background: rgba(176,120,120,0.08); border-color: rgba(176,120,120,0.4); color: #8a4848; }
+  :global(html:not(.theme-dark)) .daim-btn.active { background: rgba(176,120,120,0.85); border-color: transparent; color: #fff; }
+  :global(html:not(.theme-dark)) .daim-persona { background: rgba(242,238,232,0.9); border-color: rgba(176,160,140,0.25); }
+  :global(html:not(.theme-dark)) .daim-persona-name { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .daim-persona-desc { color: #5a6068; }
+  :global(html:not(.theme-dark)) .daim-transcript { background: rgba(242,238,232,0.6); border-color: rgba(176,160,140,0.2); }
+  :global(html:not(.theme-dark)) .daim-wake-word { background: rgba(176,120,120,0.1); border-color: rgba(176,120,120,0.3); color: #8a4848; }
+
 </style>

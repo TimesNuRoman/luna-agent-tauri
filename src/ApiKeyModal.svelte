@@ -199,4 +199,14 @@
   button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
   button.ghost { background: transparent; color: #cfd3da; border-color: #3a414b; }
   button.ghost:hover { background: #252932; }
+
+
+  /* ---- ApiKeyModal light theme ---- */
+  :global(html:not(.theme-dark)) .akm-modal { background: rgba(248,244,238,0.98); border-color: rgba(176,160,140,0.3); }
+  :global(html:not(.theme-dark)) .akm-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .akm-label { color: #5a6068; }
+  :global(html:not(.theme-dark)) .akm-input { background: rgba(255,255,255,0.8); border-color: rgba(176,160,140,0.3); color: #1a1c20; }
+  :global(html:not(.theme-dark)) .akm-btn { background: rgba(176,120,120,0.85); border-color: transparent; color: #fff; }
+  :global(html:not(.theme-dark)) .akm-error { color: #a04040; }
+
 </style>

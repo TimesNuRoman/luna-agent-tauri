@@ -532,4 +532,19 @@
     color: var(--text-muted, #6b6b70);
     margin-bottom: 4px;
   }
+
+
+  /* ---- TasksSidebar light theme ---- */
+  :global(html:not(.theme-dark)) .tasks-sidebar { background: rgba(242,238,232,0.95); border-right-color: rgba(176,160,140,0.2); }
+  :global(html:not(.theme-dark)) .tasks-header { border-bottom-color: rgba(176,160,140,0.2); }
+  :global(html:not(.theme-dark)) .tasks-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .tasks-search { background: rgba(255,255,255,0.8); border-color: rgba(176,160,140,0.3); color: #1a1c20; }
+  :global(html:not(.theme-dark)) .tasks-item { color: #5a6068; border-bottom-color: rgba(176,160,140,0.1); }
+  :global(html:not(.theme-dark)) .tasks-item:hover { background: rgba(176,120,120,0.05); color: #1a1c20; }
+  :global(html:not(.theme-dark)) .tasks-item.active { background: rgba(176,120,120,0.1); color: #8a4848; }
+  :global(html:not(.theme-dark)) .tasks-item-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .tasks-badge { background: rgba(176,120,120,0.12); color: #8a4848; }
+  :global(html:not(.theme-dark)) .tasks-badge.done { background: rgba(94,146,114,0.12); color: #2f6a45; }
+  :global(html:not(.theme-dark)) .tasks-empty { color: #8a8f97; }
+
 </style>

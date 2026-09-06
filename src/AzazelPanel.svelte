@@ -488,4 +488,19 @@
     gap: 8px;
     justify-content: flex-end;
   }
+
+
+  /* ---- Azazel light theme ---- */
+  :global(html:not(.theme-dark)) .az-header { background: rgba(242,238,232,0.9); border-bottom-color: rgba(176,160,140,0.25); }
+  :global(html:not(.theme-dark)) .az-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .az-subtitle { color: #5a6068; }
+  :global(html:not(.theme-dark)) .az-btn { background: rgba(255,255,255,0.7); border-color: rgba(176,160,140,0.3); color: #5a6068; }
+  :global(html:not(.theme-dark)) .az-btn:hover { background: rgba(176,120,120,0.08); border-color: rgba(176,120,120,0.4); color: #8a4848; }
+  :global(html:not(.theme-dark)) .az-btn.run { background: rgba(94,146,114,0.85); border-color: transparent; color: #fff; }
+  :global(html:not(.theme-dark)) .az-btn.stop { background: rgba(216,122,122,0.85); border-color: transparent; color: #fff; }
+  :global(html:not(.theme-dark)) .az-url-bar { background: rgba(255,255,255,0.8); border-color: rgba(176,160,140,0.3); color: #1a1c20; }
+  :global(html:not(.theme-dark)) .az-log { background: rgba(242,238,232,0.6); border-color: rgba(176,160,140,0.2); }
+  :global(html:not(.theme-dark)) .az-log-entry { color: #5a6068; border-bottom-color: rgba(176,160,140,0.1); }
+  :global(html:not(.theme-dark)) .az-card { background: rgba(242,238,232,0.9); border-color: rgba(176,160,140,0.25); }
+
 </style>

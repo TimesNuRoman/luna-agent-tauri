@@ -679,4 +679,11 @@
   .hud button:hover { color: #fff; background: rgba(74, 120, 200, 0.18); border-color: #4a78c8; }
   .hud button.on { color: #6dd18f; border-color: #6dd18f; background: rgba(109, 209, 143, 0.10); }
   .hud span { white-space: nowrap; }
+
+
+  /* ---- ThreeDViewport light theme ---- */
+  :global(html:not(.theme-dark)) .tdv-canvas { background: #e8e4dc; }
+  :global(html:not(.theme-dark)) .tdv-overlay { background: rgba(242,238,232,0.7); color: #5a6068; }
+  :global(html:not(.theme-dark)) .tdv-crosshair { border-color: rgba(176,120,120,0.4); }
+
 </style>

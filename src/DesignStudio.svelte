@@ -655,4 +655,20 @@
   .ds-btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .ds-btn-primary { background: var(--accent, #c9a45c); color: #fff; border-color: var(--accent, #c9a45c); }
   .muted { color: var(--text-muted, #6b6b70); }
+
+
+  /* ---- DesignStudio light theme ---- */
+  :global(html:not(.theme-dark)) .ds-header { background: rgba(242,238,232,0.9); border-bottom-color: rgba(176,160,140,0.25); }
+  :global(html:not(.theme-dark)) .ds-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .ds-toolbar { background: rgba(242,238,232,0.9); border-bottom-color: rgba(176,160,140,0.2); }
+  :global(html:not(.theme-dark)) .ds-btn { background: rgba(255,255,255,0.7); border-color: rgba(176,160,140,0.3); color: #5a6068; }
+  :global(html:not(.theme-dark)) .ds-btn:hover { background: rgba(176,120,120,0.08); border-color: rgba(176,120,120,0.4); color: #8a4848; }
+  :global(html:not(.theme-dark)) .ds-btn.active { background: rgba(176,120,120,0.85); border-color: transparent; color: #fff; }
+  :global(html:not(.theme-dark)) .ds-viewport { background: #e8e4dc; }
+  :global(html:not(.theme-dark)) .ds-sidebar { background: rgba(242,238,232,0.95); border-left-color: rgba(176,160,140,0.2); }
+  :global(html:not(.theme-dark)) .ds-panel { background: rgba(242,238,232,0.9); border-color: rgba(176,160,140,0.25); }
+  :global(html:not(.theme-dark)) .ds-panel-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .ds-input { background: rgba(255,255,255,0.8); border-color: rgba(176,160,140,0.3); color: #1a1c20; }
+  :global(html:not(.theme-dark)) .ds-empty { color: #8a8f97; }
+
 </style>

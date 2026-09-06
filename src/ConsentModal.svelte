@@ -111,4 +111,13 @@
   button.ghost:hover {
     background: #252932;
   }
+
+
+  /* ---- ConsentModal light theme ---- */
+  :global(html:not(.theme-dark)) .consent-modal { background: rgba(248,244,238,0.98); border-color: rgba(176,160,140,0.3); }
+  :global(html:not(.theme-dark)) .consent-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .consent-body { color: #5a6068; }
+  :global(html:not(.theme-dark)) .consent-btn { background: rgba(176,120,120,0.85); border-color: transparent; color: #fff; }
+  :global(html:not(.theme-dark)) .consent-btn.secondary { background: rgba(255,255,255,0.7); border-color: rgba(176,160,140,0.3); color: #5a6068; }
+
 </style>

@@ -1707,4 +1707,28 @@
   .status-pill.status-open { background: #ffd54a; color: #5a4500; }
   .status-pill.status-resolved { background: #1b7a3a; color: #fff; }
   .status-pill.status-wontfix { background: #888; color: #fff; }
+
+
+  /* ---- SelfEvolution light theme ---- */
+  :global(html:not(.theme-dark)) .evo-header { background: rgba(242,238,232,0.9); border-bottom-color: rgba(176,160,140,0.25); }
+  :global(html:not(.theme-dark)) .evo-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .evo-subtitle { color: #5a6068; }
+  :global(html:not(.theme-dark)) .evo-phase { background: rgba(242,238,232,0.9); border-color: rgba(176,160,140,0.25); }
+  :global(html:not(.theme-dark)) .evo-phase.active { border-color: rgba(176,120,120,0.5); }
+  :global(html:not(.theme-dark)) .evo-phase-num { color: #8a8f97; }
+  :global(html:not(.theme-dark)) .evo-phase-name { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .evo-phase-desc { color: #5a6068; }
+  :global(html:not(.theme-dark)) .evo-btn { background: rgba(255,255,255,0.7); border-color: rgba(176,160,140,0.3); color: #5a6068; }
+  :global(html:not(.theme-dark)) .evo-btn:hover { background: rgba(176,120,120,0.08); border-color: rgba(176,120,120,0.4); color: #8a4848; }
+  :global(html:not(.theme-dark)) .evo-btn.primary { background: rgba(176,120,120,0.85); border-color: transparent; color: #fff; }
+  :global(html:not(.theme-dark)) .evo-log { background: rgba(242,238,232,0.6); border-color: rgba(176,160,140,0.2); }
+  :global(html:not(.theme-dark)) .evo-log-entry { color: #5a6068; border-bottom-color: rgba(176,160,140,0.08); }
+  :global(html:not(.theme-dark)) .evo-progress { background: rgba(176,160,140,0.15); }
+  :global(html:not(.theme-dark)) .evo-progress-fill { background: rgba(176,120,120,0.7); }
+  :global(html:not(.theme-dark)) .evo-badge { background: rgba(176,120,120,0.1); border-color: rgba(176,120,120,0.3); color: #8a4848; }
+  :global(html:not(.theme-dark)) .evo-badge.success { background: rgba(94,146,114,0.1); border-color: rgba(94,146,114,0.3); color: #2f6a45; }
+  :global(html:not(.theme-dark)) .evo-badge.error { background: rgba(216,122,122,0.1); border-color: rgba(216,122,122,0.3); color: #a04040; }
+  :global(html:not(.theme-dark)) .evo-snapshot { background: rgba(242,238,232,0.9); border-color: rgba(176,160,140,0.25); }
+  :global(html:not(.theme-dark)) .evo-sandbox { background: rgba(236,232,224,0.6); border-color: rgba(176,160,140,0.2); }
+
 </style>

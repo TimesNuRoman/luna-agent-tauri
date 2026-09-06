@@ -95,4 +95,14 @@
   }
   .icon { font-size: 13px; width: 16px; text-align: center; }
   .name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+
+  /* ---- ThreeDOutliner light theme ---- */
+  :global(html:not(.theme-dark)) .tdo-panel { background: rgba(242,238,232,0.95); border-right-color: rgba(176,160,140,0.2); }
+  :global(html:not(.theme-dark)) .tdo-title { color: #1a1c20; border-bottom-color: rgba(176,160,140,0.2); }
+  :global(html:not(.theme-dark)) .tdo-item { color: #5a6068; }
+  :global(html:not(.theme-dark)) .tdo-item:hover { background: rgba(176,120,120,0.05); color: #1a1c20; }
+  :global(html:not(.theme-dark)) .tdo-item.selected { background: rgba(176,120,120,0.1); color: #8a4848; }
+  :global(html:not(.theme-dark)) .tdo-item-name { color: #1a1c20; }
+
 </style>
