@@ -2937,6 +2937,9 @@ async fn minimax_chat_stream(
         // to silence this in production.
         let mut first_event_logged = false;
         let minimax_debug = std::env::var("MINIMAX_DEBUG").ok().as_deref() == Some("1");
+        // M4 token tracking — accumulate input/output from MiniMax SSE usage events.
+        let mut mm_input_tokens: u64 = 0;
+        let mut mm_output_tokens: u64 = 0;
         if minimax_debug {
             let tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0);
             eprintln!(
@@ -3020,6 +3023,15 @@ async fn minimax_chat_stream(
                     // finish_reason is emitted in the last chunk alongside an empty delta
                     if let Some(fr) = choice.get("finish_reason").and_then(|f| f.as_str()) {
                         finish_reason = Some(fr.to_string());
+                    }
+                    // M4: MiniMax sends usage in the last SSE chunk.
+                    if let Some(usage) = v.get("usage") {
+                        if let Some(n) = usage.get("prompt_tokens").and_then(|x| x.as_u64()) {
+                            mm_input_tokens = n;
+                        }
+                        if let Some(n) = usage.get("completion_tokens").and_then(|x| x.as_u64()) {
+                            mm_output_tokens = n;
+                        }
                     }
                 }
             }
@@ -5308,8 +5320,26 @@ async fn minimax_chat_stream(
             }
         }
     }
-    // Fell off the iteration cap РІР‚вЂќ surface as graceful completion.
+    // Fell off the iteration cap — surface as graceful completion.
     let _ = app.emit("ai_done", true);
+
+    // M4: log token usage from this MiniMax chat turn.
+    if mm_input_tokens > 0 || mm_output_tokens > 0 {
+        let cost = services::agent::cost::estimate_response_usd(
+            &model,
+            mm_input_tokens,
+            mm_output_tokens,
+        );
+        tracing::info!(
+            input_tokens = mm_input_tokens,
+            output_tokens = mm_output_tokens,
+            usd = cost,
+            model = %model,
+            "minimax_chat_stream: turn cost"
+        );
+        // TODO(r5): accumulate into session-level cost tracker exposed via UI.
+    }
+
     Ok(())
 }
 
