@@ -9,7 +9,7 @@ use tauri::image::Image;
 
 use std::process::Stdio;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, LazyLock};
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
@@ -207,6 +207,45 @@ pub struct AppState {
     /// `Arc`-backed handle into the same registry managed by
     /// `TaskDeps::personas`.
     pub personas: Arc<services::agent::personas::PersonaRegistry>,
+    /// M4 token cost tracker — accumulates usage across chat turns within
+    /// the current app session. Exposed to UI via `get_session_cost`.
+    pub session_cost: parking_lot::Mutex<SessionCostTracker>,
+}
+
+/// Process-global session cost tracker. Written by minimax_chat_stream after
+/// every turn; read by the `get_session_cost` Tauri command.
+pub static SESSION_COST: LazyLock<parking_lot::Mutex<SessionCostTracker>> =
+    LazyLock::new(|| parking_lot::Mutex::new(SessionCostTracker::new()));
+
+/// M4: returns the current session's token usage and cost breakdown.
+/// Called by the frontend to display the cost bar in the UI.
+#[tauri::command]
+fn get_session_cost() -> serde_json::Value {
+    let tracker = SESSION_COST.lock();
+    let estimated_monthly = tracker.estimated_monthly_usd();
+    serde_json::json!({
+        "input_tokens": tracker.input_tokens,
+        "output_tokens": tracker.output_tokens,
+        "estimated_usd": tracker.estimated_usd,
+        "turns": tracker.turns,
+        "session_duration_ms": {
+            "start": tracker.session_start_ms,
+            "now": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0)
+        },
+        "estimated_monthly_usd": estimated_monthly,
+        "by_model": tracker.by_model,
+        // MiniMax M3 pricing reference for the UI to show "remaining budget".
+        // Default $5/month budget, configurable in Settings later.
+        "budget_usd": 5.0,
+        "budget_used_pct": if estimated_monthly > 0.0 {
+            (estimated_monthly / 5.0 * 100.0).min(100.0)
+        } else {
+            0.0
+        },
+    })
 }
 
 /// Payload of a `video-auto-trigger` event. Stored in
@@ -222,6 +261,79 @@ pub struct AutoInvokePayload {
     pub height: u32,
     pub goal: String,
     pub t_ms: u128,
+}
+
+/// M4 token cost tracking — accumulates usage within a session window.
+/// Reset on app restart. Exposed to UI via `get_session_cost` command.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SessionCostTracker {
+    /// Input tokens consumed this session.
+    pub input_tokens: u64,
+    /// Output tokens consumed this session.
+    pub output_tokens: u64,
+    /// Estimated USD (recomputed from token counts at read time).
+    pub estimated_usd: f64,
+    /// Chat turns in this session.
+    pub turns: u32,
+    /// Session start (epoch ms).
+    pub session_start_ms: u64,
+    /// Per-model breakdown.
+    pub by_model: std::collections::HashMap<String, ModelCostSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelCostSnapshot {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub estimated_usd: f64,
+    pub turns: u32,
+}
+
+impl SessionCostTracker {
+    pub fn new() -> Self {
+        Self {
+            session_start_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+            ..Default::default()
+        }
+    }
+
+    /// Record tokens from one chat turn. `usd` is the precomputed cost.
+    pub fn record(&mut self, model: &str, input_tokens: u64, output_tokens: u64, usd: f64) {
+        self.input_tokens += input_tokens;
+        self.output_tokens += output_tokens;
+        self.estimated_usd += usd;
+        self.turns += 1;
+        let snap = self.by_model.entry(model.to_string()).or_default();
+        snap.input_tokens += input_tokens;
+        snap.output_tokens += output_tokens;
+        snap.estimated_usd += usd;
+        snap.turns += 1;
+    }
+
+    /// Returns estimated monthly spend assuming linear extrapolation from
+    /// this session's duration. Returns 0 if session < 1 minute.
+    pub fn estimated_monthly_usd(&self) -> f64 {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as u64)
+            .unwrap_or(0);
+        let session_secs = now.saturating_sub(self.session_start_ms / 1000);
+        if session_secs < 60 {
+            return 0.0;
+        }
+        // sessions_per_month ≈ 30 days × 24h × (sessions/day)
+        let sessions_this_session = if session_secs >= 3600 {
+            // assume one session = 1 hour of active use
+            (session_secs as f64 / 3600.0).max(1.0)
+        } else {
+            1.0
+        };
+        let sessions_per_month = sessions_this_session * 30.0;
+        (self.estimated_usd / sessions_this_session) * sessions_per_month
+    }
 }
 
 /// Hard cap on the in-memory undo stack. 50 РІвЂ°в‚¬ enough for one full agent
@@ -5337,7 +5449,8 @@ async fn minimax_chat_stream(
             model = %model,
             "minimax_chat_stream: turn cost"
         );
-        // TODO(r5): accumulate into session-level cost tracker exposed via UI.
+        // Accumulate into the global session tracker for UI display.
+        SESSION_COST.lock().record(&model, mm_input_tokens, mm_output_tokens, cost);
     }
 
     Ok(())
@@ -9846,6 +9959,7 @@ pub fn run() {
             // D: AI
             ai_chat_stream,
             minimax_chat_stream,
+            get_session_cost,
             // Existing
             call_minimax,
             generate_image_minimax,

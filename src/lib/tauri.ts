@@ -273,6 +273,29 @@ export function minimaxChatStream(req: ChatRequest) {
   return core().invoke<void>('minimax_chat_stream', { req });
 }
 
+// ---------- M4: Token cost tracking ----------
+
+export type SessionCost = {
+  input_tokens: number;
+  output_tokens: number;
+  estimated_usd: number;
+  turns: number;
+  session_duration_ms: { start: number; now: number };
+  estimated_monthly_usd: number;
+  by_model: Record<string, {
+    input_tokens: number;
+    output_tokens: number;
+    estimated_usd: number;
+    turns: number;
+  }>;
+  budget_usd: number;
+  budget_used_pct: number;
+};
+
+export function getSessionCost(): Promise<SessionCost> {
+  return core().invoke<SessionCost>('get_session_cost');
+}
+
 export type NewsResult = {
   title: string;
   snippet: string;

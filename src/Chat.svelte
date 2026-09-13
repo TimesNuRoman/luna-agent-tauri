@@ -1080,11 +1080,13 @@
     return Math.max(1, Math.round(t));
   }
   let contextPopover = false;
-  let contextView: 'summary' | 'content' = (() => {
+  let contextView: 'summary' | 'content' | 'cost' = (() => {
     try {
       const v = localStorage.getItem('luna.chat.contextTab');
-      return v === 'content' ? 'content' : 'summary';
-    } catch { return 'summary'; }
+      if (v === 'content') return 'content';
+      if (v === 'cost') return 'cost';
+    } catch { /* noop */ }
+    return 'summary';
   })();
   // Refs for the outside-click detector. Without these, the popover
   // would either close on every click (broken `on:blur` race) or
@@ -1606,10 +1608,23 @@
   function toggleContextPopover() {
     contextPopover = !contextPopover;
   }
-  function setContextView(v: 'summary' | 'content') {
+  function setContextView(v: 'summary' | 'content' | 'cost') {
     contextView = v;
     try { localStorage.setItem('luna.chat.contextTab', v); } catch { /* ignore */ }
   }
+  // M4: session cost state
+  let sessionCost: SessionCost | null = null;
+  let costLoadError = false;
+  async function loadSessionCost() {
+    try {
+      sessionCost = await getSessionCost();
+      costLoadError = false;
+    } catch {
+      costLoadError = true;
+    }
+  }
+  // Refresh cost when the cost tab opens or after every send.
+  $: if (contextView === 'cost') void loadSessionCost();
   function onWindowClick(e: MouseEvent) {
     if (!contextPopover) return;
     const t = e.target as Node | null;
@@ -5100,16 +5115,20 @@
             on:keydown={(e) => {
               if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
                 e.preventDefault();
-                setContextView('content');
+                if (contextView === 'summary') setContextView('content');
+                else if (contextView === 'content') setContextView('cost');
+                else setContextView('summary');
               } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
                 e.preventDefault();
-                setContextView('summary');
+                if (contextView === 'cost') setContextView('content');
+                else if (contextView === 'content') setContextView('summary');
+                else setContextView('cost');
               } else if (e.key === 'Home') {
                 e.preventDefault();
                 setContextView('summary');
               } else if (e.key === 'End') {
                 e.preventDefault();
-                setContextView('content');
+                setContextView('cost');
               }
             }}
           >
@@ -5130,6 +5149,15 @@
               on:click={() => setContextView('content')}
               title="Показать то, что реально уходит в модель"
             >{@html IconList()}<span>Содержимое</span>{#if realContext.length > 0} <span class="context-tab-count">{realContext.length}</span>{/if}</button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={contextView === 'cost'}
+              class="context-tab"
+              class:active={contextView === 'cost'}
+              on:click={() => { setContextView('cost'); void loadSessionCost(); }}
+              title="Расходы за сессию"
+            ><span style="font-size:0.8em;line-height:1">💰</span><span>Cost</span>{#if sessionCost && sessionCost.turns > 0} <span class="context-tab-count">{sessionCost.turns}</span>{/if}</button>
           </div>
 
           <!-- Pinned / attached files in the active context window.
@@ -5302,6 +5330,80 @@
                 <span>— весь контекст. Системный промпт формируется в Rust, его размер показан приблизительно (≈600 токенов).</span>
               </div>
             </div>
+          {:else if contextView === 'cost'}
+            <!-- M4 Cost tab: token + USD breakdown from this session -->
+            {#if costLoadError}
+              <div class="context-content-empty">
+                <span class="context-content-empty-icon">{@html IconAlert()}</span>
+                <span>Не удалось загрузить данные о расходах.</span>
+              </div>
+            {:else if !sessionCost || sessionCost.turns === 0}
+              <div class="context-content-empty">
+                <span class="context-content-empty-icon">💰</span>
+                <span>Пока нет данных — отправьте сообщение.</span>
+              </div>
+            {:else}
+              <!-- Monthly budget bar -->
+              <div class="context-bar-row" style="margin-bottom:4px">
+                <div class="context-bar">
+                  <div class="context-bar-fill {sessionCost.budget_used_pct >= 85 ? 'crit' : sessionCost.budget_used_pct >= 65 ? 'high' : 'low'}"
+                    style="width: {Math.min(100, sessionCost.budget_used_pct)}%"></div>
+                </div>
+                <span class="context-bar-pct">{sessionCost.budget_used_pct.toFixed(1)}%</span>
+              </div>
+              <div class="context-numbers">
+                <span class="context-numbers-primary">
+                  <b>${sessionCost.estimated_monthly_usd.toFixed(2)}</b>
+                  <span class="context-numbers-of">в месяц</span>
+                </span>
+                <span class="context-numbers-sep">·</span>
+                <span class="context-remaining">бюджет <b>${sessionCost.budget_usd}</b></span>
+              </div>
+
+              <!-- This session -->
+              <div class="context-bd-title">Эта сессия</div>
+              <div class="context-bd-list">
+                <div class="context-bd-row" title="Ходов чата">
+                  <span class="context-bd-dot" style="background: var(--success)"></span>
+                  <span class="context-bd-label">Ходов чата</span>
+                  <span class="context-bd-tok">{sessionCost.turns}</span>
+                </div>
+                <div class="context-bd-row" title="Входные токены">
+                  <span class="context-bd-dot" style="background: var(--info)"></span>
+                  <span class="context-bd-label">Входные токены</span>
+                  <span class="context-bd-tok">{formatTokens(sessionCost.input_tokens)}</span>
+                </div>
+                <div class="context-bd-row" title="Выходные токены">
+                  <span class="context-bd-dot" style="background: #c882c8"></span>
+                  <span class="context-bd-label">Выходные токены</span>
+                  <span class="context-bd-tok">{formatTokens(sessionCost.output_tokens)}</span>
+                </div>
+                <div class="context-bd-row" title="Оценка USD">
+                  <span class="context-bd-dot" style="background: #d8a84a"></span>
+                  <span class="context-bd-label">Расход USD</span>
+                  <span class="context-bd-tok">${sessionCost.estimated_usd.toFixed(4)}</span>
+                </div>
+              </div>
+
+              <!-- Per-model breakdown -->
+              {#if Object.keys(sessionCost.by_model).length > 1}
+                <div class="context-bd-title">По модели</div>
+                <div class="context-bd-list">
+                  {#each Object.entries(sessionCost.by_model) as [model, snap]}
+                    <div class="context-bd-row" title="{model}">
+                      <span class="context-bd-dot" style="background: #6f9ce8"></span>
+                      <span class="context-bd-label" style="font-size:0.8em">{model}</span>
+                      <span class="context-bd-tok">{snap.turns}ход · ${snap.estimated_usd.toFixed(4)}</span>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+
+              <div class="context-foot-note">
+                💡 Минимум 1 сообщение для оценки месячного расхода.
+                Цены MiniMax M3: $0.50 вход / $1.50 выход за 1M токенов.
+              </div>
+            {/if}
           {/if}
           <div class="context-pop-actions">
             <div class="context-action-group">
@@ -8056,11 +8158,21 @@
   :global(html:not(.theme-dark)) .context-content-item.system .context-content-text { color: #2d2418; }
   :global(html:not(.theme-dark)) .context-content-item.highlight { background: rgba(245, 181, 107, 0.22); border-color: rgba(245, 181, 107, 0.55); }
   :global(html:not(.theme-dark)) .context-content-meta-sep,
-  :global(html:not(.theme-dark)) .context-cost-sep,
-  :global(html:not(.theme-dark)) .context-numbers-sep { color: #cfc8b8; }
+  :global(html:not(.theme-dark)) .context-cost-sep { color: #cfc8b8; }
+
+  /* ---- M4: cost tab ---- */
+  .context-foot-note {
+    font-size: 10px;
+    color: #6c7280;
+    line-height: 1.4;
+    padding: 6px 4px 2px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    margin-top: 4px;
+  }
+  :global(html:not(.theme-dark)) .context-foot-note { color: #8a7a68; border-color: rgba(60,50,40,0.10); }
 </style>
 
-<!-- Phase UX-2: credentials modal. Mounted once at the bottom of the
+<!-- Phase UX-2: credentials modal.
      template; showCredentials toggles it. The modal itself is in
      CredentialManager.svelte. -->
 {#if showCredentials}
