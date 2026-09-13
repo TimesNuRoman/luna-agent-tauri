@@ -11,6 +11,7 @@ pub mod research;
 pub mod shell;
 pub mod streaming;
 pub mod telegram;
+pub mod telegram_network;
 pub mod three_d;
 pub mod vision;
 pub mod voice;

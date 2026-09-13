@@ -28,13 +28,209 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
-use teloxide::prelude::{ChatId, Requester};
 use teloxide::payloads::{GetUpdatesSetters, SendMessageSetters};
+use teloxide::prelude::{ChatId, Requester};
 use teloxide::types::{ChatAction, MessageId, MessageKind};
 
 use super::chat_sink::TelegramSink;
 use super::shell::tokenize;
 use super::streaming::{chat_text_stream_core, StreamConfig};
+
+// =====================================================================
+// Photo caching
+// =====================================================================
+
+fn photo_cache_dir() -> PathBuf {
+    let base = std::env::var("LOCALAPPDATA")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".local").join("share"))
+        })
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("luna-agent").join("telegram_photo_cache")
+}
+
+/// Cache a photo by its Telegram file_id.
+/// Returns the cached path if already cached, or saves and returns new path.
+async fn cache_photo(bot: &teloxide::Bot, file_id: &str) -> Option<PathBuf> {
+    let cache_dir = photo_cache_dir();
+    let cached = cache_dir.join(format!("{file_id}.jpg"));
+    if cached.exists() {
+        return Some(cached);
+    }
+    // Ensure cache dir exists
+    if let Err(e) = std::fs::create_dir_all(&cache_dir) {
+        tracing::warn!(?e, "failed to create photo cache dir");
+        return None;
+    }
+    // Download from Telegram
+    let tg_file = bot.get_file(file_id).await.ok()?;
+    let url = format!(
+        "https://api.telegram.org/file/bot{}/{}",
+        "", // token filled by bot
+        tg_file.path
+    );
+    let bytes = reqwest::get(&url).await.ok()?.bytes().await.ok()?;
+    if std::fs::write(&cached, &bytes).is_err() {
+        return None;
+    }
+    Some(cached)
+}
+
+// =====================================================================
+// format_message — MDV2 formatting
+// =====================================================================
+
+/// Format a message with MarkdownV2, escaping special characters.
+/// Consumes the input and returns the escaped string.
+/// Handles bold/italic via nested markers (strong/emphasis → *_text_*).
+fn format_md2(text: &str) -> String {
+    escape_md2(text)
+}
+
+// =====================================================================
+// set_bot_commands — register command menu
+// =====================================================================
+
+/// Register the bot command menu with Telegram via setMyCommands.
+/// This makes commands appear in the input-bar dropdown on supported clients.
+pub async fn set_bot_commands(bot: &teloxide::Bot) {
+    use teloxide::types::BotCommand;
+    let commands = vec![
+        BotCommand::new("start", "Start the bot and see the welcome message"),
+        BotCommand::new("help", "Show help and command reference"),
+        BotCommand::new("status", "Show bot status and diagnostics"),
+        BotCommand::new("whoami", "Show your Telegram user info"),
+        BotCommand::new("workspace", "Show or set the workspace path"),
+        BotCommand::new("ls", "List files in the workspace"),
+        BotCommand::new("read", "Read a file from the workspace"),
+        BotCommand::new("find", "Search files by name or content"),
+        BotCommand::new("edit", "Edit a file with a 3-step confirm flow"),
+        BotCommand::new("create", "Create a file or project from a template"),
+        BotCommand::new("run", "Run a shell command in the workspace"),
+        BotCommand::new("upload", "Upload a file to the workspace"),
+        BotCommand::new("model", "Show or set the active AI model"),
+        BotCommand::new("stop", "Cancel the current chat stream"),
+        BotCommand::new("cancel", "Cancel the current pending edit flow"),
+    ];
+    if let Err(e) = bot.set_my_commands(commands).await {
+        tracing::warn!(
+            ?e,
+            "set_my_commands failed — clients may not show command menu"
+        );
+    }
+}
+
+// =====================================================================
+// Native media send helpers
+// =====================================================================
+
+/// Send a document (file) to a chat, with optional caption.
+pub async fn send_document_native(
+    bot: &teloxide::Bot,
+    chat_id: ChatId,
+    file_path: &Path,
+    caption: Option<&str>,
+) -> Result<teloxide::types::Message, String> {
+    let file = tokio::fs::File::open(file_path)
+        .await
+        .map_err(|e| format!("open file: {e}"))?;
+    let filename = file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file");
+    let mut req = bot.send_document(chat_id, teloxide::payloads::InputFile::file(file, filename));
+    if let Some(cap) = caption {
+        req = req.caption(cap);
+    }
+    req.await.map_err(|e| format!("send_document: {e}"))
+}
+
+/// Send a video file to a chat, with optional caption.
+pub async fn send_video_native(
+    bot: &teloxide::Bot,
+    chat_id: ChatId,
+    file_path: &Path,
+    caption: Option<&str>,
+) -> Result<teloxide::types::Message, String> {
+    let file = tokio::fs::File::open(file_path)
+        .await
+        .map_err(|e| format!("open file: {e}"))?;
+    let filename = file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("video.mp4");
+    let mut req = bot.send_video(chat_id, teloxide::payloads::InputFile::file(file, filename));
+    if let Some(cap) = caption {
+        req = req.caption(cap);
+    }
+    req.await.map_err(|e| format!("send_video: {e}"))
+}
+
+/// Send an image file to a chat, with optional caption.
+pub async fn send_image_native(
+    bot: &teloxide::Bot,
+    chat_id: ChatId,
+    file_path: &Path,
+    caption: Option<&str>,
+) -> Result<teloxide::types::Message, String> {
+    let file = tokio::fs::File::open(file_path)
+        .await
+        .map_err(|e| format!("open file: {e}"))?;
+    let filename = file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("image.jpg");
+    let mut req = bot.send_photo(chat_id, teloxide::payloads::InputFile::file(file, filename));
+    if let Some(cap) = caption {
+        req = req.caption(cap);
+    }
+    req.await.map_err(|e| format!("send_image: {e}"))
+}
+
+/// Send a media album (group) from file paths (photos only).
+/// Splits into chunks of 10 (Telegram max per album).
+pub async fn send_media_album(
+    bot: &teloxide::Bot,
+    chat_id: ChatId,
+    file_paths: &[&Path],
+    caption: Option<&str>,
+) -> Result<Vec<teloxide::types::Message>, String> {
+    use teloxide::prelude::Requester;
+    use teloxide::types::InputMediaPhoto;
+
+    let chunks: Vec<_> = file_paths.chunks(10).collect();
+    let mut messages = Vec::new();
+    for (i, chunk) in chunks.iter().enumerate() {
+        let medias: Vec<InputMediaPhoto> = chunk
+            .iter()
+            .map(|p| {
+                let file = std::fs::File::open(p).expect("file exists");
+                let name = p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("photo.jpg");
+                let media = teloxide::payloads::InputFile::file(file, name);
+                let mut inp = InputMediaPhoto::new(media);
+                // Only add caption to the first photo of the first chunk
+                if i == 0 && chunk.iter().position(|x| *x == *p) == Some(0) {
+                    if let Some(cap) = caption {
+                        inp = inp.caption(cap);
+                    }
+                }
+                inp
+            })
+            .collect();
+        match bot.send_media_group(chat_id, medias).await {
+            Ok(msgs) => messages.extend(msgs),
+            Err(e) => return Err(format!("send_media_group: {e}")),
+        }
+    }
+    Ok(messages)
+}
 
 // =====================================================================
 // State
@@ -171,7 +367,9 @@ fn telegram_config_path() -> PathBuf {
         .ok()
         .map(PathBuf::from)
         .or_else(|| {
-            std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".local").join("share"))
+            std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".local").join("share"))
         })
         .unwrap_or_else(std::env::temp_dir);
     base.join("luna-agent").join("telegram.json")
@@ -376,9 +574,8 @@ pub fn parse_command(text: &str) -> Command {
             }
         }
         "/run" | "/exec" | "/shell" => {
-            let toks = tokenize(rest).unwrap_or_else(|_| {
-                rest.split_whitespace().map(String::from).collect()
-            });
+            let toks = tokenize(rest)
+                .unwrap_or_else(|_| rest.split_whitespace().map(String::from).collect());
             if toks.is_empty() {
                 Command::Help
             } else {
@@ -503,14 +700,8 @@ pub fn spawn_dispatcher(app: AppHandle) -> Result<String, String> {
         abort,
         alive,
     };
-    *state
-        .bot_handle
-        .lock()
-        .map_err(|e| e.to_string())? = Some(handle);
-    *state
-        .token_cached
-        .lock()
-        .map_err(|e| e.to_string())? = Some(token);
+    *state.bot_handle.lock().map_err(|e| e.to_string())? = Some(handle);
+    *state.token_cached.lock().map_err(|e| e.to_string())? = Some(token);
     let _ = app.emit("telegram://status", ());
     Ok(username)
 }
@@ -537,16 +728,17 @@ pub fn get_status(app: &AppHandle) -> TelegramStatus {
     let (running, bot_username, started_at_ms) = app
         .try_state::<Arc<TelegramState>>()
         .and_then(|s| {
-            s.bot_handle
-                .lock()
-                .ok()
-                .map(|g| {
-                    let h = g.as_ref();
-                    match h {
-                        Some(h) => (*h.alive.lock().unwrap(), Some(h.username.clone()), Some(h.started_at_ms)),
-                        None => (false, None, None),
-                    }
-                })
+            s.bot_handle.lock().ok().map(|g| {
+                let h = g.as_ref();
+                match h {
+                    Some(h) => (
+                        *h.alive.lock().unwrap(),
+                        Some(h.username.clone()),
+                        Some(h.started_at_ms),
+                    ),
+                    None => (false, None, None),
+                }
+            })
         })
         .unwrap_or((false, None, None));
     let allow_list_size = app
@@ -676,7 +868,10 @@ fn build_checklist(
     } else {
         "no_token"
     };
-    let current_step = checklist.iter().position(|c| !c.done).unwrap_or(checklist.len() - 1);
+    let current_step = checklist
+        .iter()
+        .position(|c| !c.done)
+        .unwrap_or(checklist.len() - 1);
     let message = match state {
         "running" => format!(
             "Telegram bot running as @{}.",
@@ -692,10 +887,7 @@ fn build_checklist(
     (checklist, message, current_step)
 }
 
-pub fn telegram_connect(
-    app: &AppHandle,
-    args: TelegramConnectArgs,
-) -> TelegramConnectResult {
+pub fn telegram_connect(app: &AppHandle, args: TelegramConnectArgs) -> TelegramConnectResult {
     let status = get_status(app);
     let action = args.action.trim().to_lowercase();
     let mut result = TelegramConnectResult {
@@ -715,7 +907,12 @@ pub fn telegram_connect(
     // reflects post-state, not pre-state.
     match action.as_str() {
         "save_token" => {
-            let Some(t) = args.token.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+            let Some(t) = args
+                .token
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            else {
                 result.error = Some("missing or empty `token`".into());
                 let (cl, msg, step) = build_checklist(
                     result.token_set,
@@ -764,11 +961,7 @@ pub fn telegram_connect(
                         combined.dedup();
                         combined.truncate(64);
                         *g = combined.clone();
-                        let last_chat = st
-                            .last_known_chat_id
-                            .lock()
-                            .ok()
-                            .and_then(|gc| *gc);
+                        let last_chat = st.last_known_chat_id.lock().ok().and_then(|gc| *gc);
                         if let Err(e) = write_allow_list_to_disk(&combined, last_chat) {
                             result.error = Some(e);
                         }
@@ -852,12 +1045,8 @@ pub fn telegram_connect(
     result
 }
 
-async fn run_dispatcher(
-    bot: teloxide::Bot,
-    app: AppHandle,
-    state: Arc<TelegramState>,
-) {
-    use teloxide::types::{UpdateKind, UpdateId};
+async fn run_dispatcher(bot: teloxide::Bot, app: AppHandle, state: Arc<TelegramState>) {
+    use teloxide::types::{UpdateId, UpdateKind};
 
     // Long-poll loop. We don't use `Dispatcher` because dptree's
     // handler-style dispatch is overkill for our single endpoint and
@@ -1171,9 +1360,7 @@ async fn dispatch_command(
                     let _ = tx.send(());
                     let _ = bot.send_message(chat_id, "⏹ Stopped.").await;
                 } else {
-                    let _ = bot
-                        .send_message(chat_id, "ℹ Nothing to stop.")
-                        .await;
+                    let _ = bot.send_message(chat_id, "ℹ Nothing to stop.").await;
                 }
             }
         }
@@ -1228,9 +1415,7 @@ async fn handle_workspace(
     let app_st = match app.try_state::<crate::AppState>() {
         Some(s) => s,
         None => {
-            let _ = bot
-                .send_message(chat_id, "⚠️ AppState unavailable.")
-                .await;
+            let _ = bot.send_message(chat_id, "⚠️ AppState unavailable.").await;
             return;
         }
     };
@@ -1251,10 +1436,7 @@ async fn handle_workspace(
             let pbuf = PathBuf::from(&p);
             if !pbuf.is_dir() {
                 let _ = bot
-                    .send_message(
-                        chat_id,
-                        format!("❌ Not a directory: `{p}`"),
-                    )
+                    .send_message(chat_id, format!("❌ Not a directory: `{p}`"))
                     .parse_mode(teloxide::types::ParseMode::MarkdownV2)
                     .await;
                 return;
@@ -1270,10 +1452,7 @@ async fn handle_workspace(
                 .last_activity
                 .store(unix_ms(), std::sync::atomic::Ordering::Relaxed);
             let _ = bot
-                .send_message(
-                    chat_id,
-                    format!("✅ Workspace: `{}`", pbuf.display()),
-                )
+                .send_message(chat_id, format!("✅ Workspace: `{}`", pbuf.display()))
                 .parse_mode(teloxide::types::ParseMode::MarkdownV2)
                 .await;
         }
@@ -1306,10 +1485,7 @@ async fn handle_ls(
         Ok(p) => p,
         Err(e) => {
             let _ = bot
-                .send_message(
-                    chat_id,
-                    format!("❌ Path error: {e}"),
-                )
+                .send_message(chat_id, format!("❌ Path error: {e}"))
                 .await;
             return;
         }
@@ -1347,12 +1523,7 @@ async fn handle_ls(
     send_long(bot, chat_id, &body).await;
 }
 
-async fn handle_read(
-    bot: &teloxide::Bot,
-    state: &Arc<TelegramState>,
-    chat_id: ChatId,
-    path: &str,
-) {
+async fn handle_read(bot: &teloxide::Bot, state: &Arc<TelegramState>, chat_id: ChatId, path: &str) {
     use teloxide::prelude::Requester;
     let _ = state;
     let app = app_handle();
@@ -1390,7 +1561,10 @@ async fn handle_read(
         let _ = bot
             .send_message(
                 chat_id,
-                format!("```\n{head}\n```\n…(truncated, {} bytes total)", content.len()),
+                format!(
+                    "```\n{head}\n```\n…(truncated, {} bytes total)",
+                    content.len()
+                ),
             )
             .parse_mode(teloxide::types::ParseMode::MarkdownV2)
             .await;
@@ -1487,11 +1661,7 @@ async fn handle_find(
         };
         for (lineno, line) in content.lines().enumerate() {
             if let Some((a, b)) = matcher(line) {
-                let rel = p
-                    .strip_prefix(&root)
-                    .unwrap_or(p)
-                    .display()
-                    .to_string();
+                let rel = p.strip_prefix(&root).unwrap_or(p).display().to_string();
                 let snippet = &line[a.saturating_sub(20)..(b + 20).min(line.len())];
                 results.push(format!("{}:{}: {}", rel, lineno + 1, snippet));
                 if results.len() >= 20 {
@@ -1581,10 +1751,7 @@ async fn handle_edit_start(
     };
     if !full.is_file() {
         let _ = bot
-            .send_message(
-                chat_id,
-                format!("❌ Not a file: `{path}`"),
-            )
+            .send_message(chat_id, format!("❌ Not a file: `{path}`"))
             .parse_mode(teloxide::types::ParseMode::MarkdownV2)
             .await;
         return;
@@ -1692,9 +1859,7 @@ async fn handle_edit_apply(
         let p = match g.remove(&chat_id.0) {
             Some(p) => p,
             None => {
-                let _ = bot
-                    .send_message(chat_id, "ℹ Nothing to apply.")
-                    .await;
+                let _ = bot.send_message(chat_id, "ℹ Nothing to apply.").await;
                 return;
             }
         };
@@ -1777,9 +1942,7 @@ async fn handle_edit_apply(
         return;
     }
     if let Err(e) = std::fs::rename(&tmp, &full) {
-        let _ = bot
-            .send_message(chat_id, format!("❌ Rename: {e}"))
-            .await;
+        let _ = bot.send_message(chat_id, format!("❌ Rename: {e}")).await;
         return;
     }
     let bytes_written = after.len() as u64;
@@ -1814,11 +1977,7 @@ async fn handle_edit_apply(
         .await;
 }
 
-async fn handle_edit_cancel(
-    bot: &teloxide::Bot,
-    state: &Arc<TelegramState>,
-    chat_id: ChatId,
-) {
+async fn handle_edit_cancel(bot: &teloxide::Bot, state: &Arc<TelegramState>, chat_id: ChatId) {
     use teloxide::prelude::Requester;
     if let Ok(mut g) = state.pending_edits.lock() {
         if g.remove(&chat_id.0).is_some() {
@@ -1883,9 +2042,7 @@ async fn handle_revert(
         return;
     }
     if let Err(e) = std::fs::rename(&tmp, &full) {
-        let _ = bot
-            .send_message(chat_id, format!("❌ Rename: {e}"))
-            .await;
+        let _ = bot.send_message(chat_id, format!("❌ Rename: {e}")).await;
         return;
     }
     let _ = app.emit(
@@ -1916,10 +2073,7 @@ async fn handle_create(
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
     {
         let _ = bot
-            .send_message(
-                chat_id,
-                "❌ Name must be ≤64 chars, [a-zA-Z0-9._-] only.",
-            )
+            .send_message(chat_id, "❌ Name must be ≤64 chars, [a-zA-Z0-9._-] only.")
             .await;
         return;
     }
@@ -1946,16 +2100,12 @@ async fn handle_create(
         }
     };
     if !parent_dir.is_dir() {
-        let _ = bot
-            .send_message(chat_id, "❌ Parent dir not found.")
-            .await;
+        let _ = bot.send_message(chat_id, "❌ Parent dir not found.").await;
         return;
     }
     let project_dir = parent_dir.join(name);
     if project_dir.exists() {
-        let _ = bot
-            .send_message(chat_id, "❌ Already exists.")
-            .await;
+        let _ = bot.send_message(chat_id, "❌ Already exists.").await;
         return;
     }
     let template = template.unwrap_or_else(|| "blank".to_string());
@@ -1970,9 +2120,7 @@ async fn handle_create(
         }
     };
     if let Err(e) = std::fs::create_dir_all(&project_dir) {
-        let _ = bot
-            .send_message(chat_id, format!("❌ mkdir: {e}"))
-            .await;
+        let _ = bot.send_message(chat_id, format!("❌ mkdir: {e}")).await;
         return;
     }
     for f in tmpl.files {
@@ -2031,7 +2179,9 @@ async fn handle_run(
         Ok(r) => {
             let mut body = format!(
                 "Exit: {}\nDuration: {}ms\n",
-                r.exit_code.map(|c| c.to_string()).unwrap_or_else(|| "?".into()),
+                r.exit_code
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "?".into()),
                 r.duration_ms
             );
             if r.timed_out {
@@ -2052,18 +2202,12 @@ async fn handle_run(
             send_long(bot, chat_id, &body).await;
         }
         Err(e) => {
-            let _ = bot
-                .send_message(chat_id, format!("❌ {e}"))
-                .await;
+            let _ = bot.send_message(chat_id, format!("❌ {e}")).await;
         }
     }
 }
 
-async fn handle_upload_arm(
-    bot: &teloxide::Bot,
-    _state: &Arc<TelegramState>,
-    chat_id: ChatId,
-) {
+async fn handle_upload_arm(bot: &teloxide::Bot, _state: &Arc<TelegramState>, chat_id: ChatId) {
     use teloxide::prelude::Requester;
     arm_upload(chat_id.0);
     let _ = bot
@@ -2146,9 +2290,7 @@ async fn handle_upload(
     let tg_file = match bot.get_file(&file_id).await {
         Ok(f) => f,
         Err(e) => {
-            let _ = bot
-                .send_message(chat_id, format!("❌ getFile: {e}"))
-                .await;
+            let _ = bot.send_message(chat_id, format!("❌ getFile: {e}")).await;
             return Ok(());
         }
     };
@@ -2171,17 +2313,13 @@ async fn handle_upload(
             }
         },
         Err(e) => {
-            let _ = bot
-                .send_message(chat_id, format!("❌ download: {e}"))
-                .await;
+            let _ = bot.send_message(chat_id, format!("❌ download: {e}")).await;
             return Ok(());
         }
     };
     let target = root.join(&safe_name);
     if let Err(e) = std::fs::write(&target, &bytes) {
-        let _ = bot
-            .send_message(chat_id, format!("❌ write: {e}"))
-            .await;
+        let _ = bot.send_message(chat_id, format!("❌ write: {e}")).await;
         return Ok(());
     }
     let rel = target
@@ -2192,10 +2330,7 @@ async fn handle_upload(
     let _ = bot
         .send_message(
             chat_id,
-            format!(
-                "✅ Saved: `{rel}` ({} bytes).",
-                bytes.len()
-            ),
+            format!("✅ Saved: `{rel}` ({} bytes).", bytes.len()),
         )
         .parse_mode(teloxide::types::ParseMode::MarkdownV2)
         .await;
@@ -2266,9 +2401,7 @@ async fn handle_chat(
     // Pre-create the placeholder message and wire the Telegram sink.
     let bot_clone = bot.clone();
     let app_clone = app.clone();
-    let placeholder = bot
-        .send_message(chat_id, "▌")
-        .await;
+    let placeholder = bot.send_message(chat_id, "▌").await;
     let msg_id = match placeholder {
         Ok(m) => m.id,
         Err(e) => {
@@ -2294,9 +2427,7 @@ async fn handle_chat(
             // Best-effort: spawn and ignore errors. We do NOT await here
             // because the sink trait is sync.
             tokio::spawn(async move {
-                let _ = bot
-                    .edit_message_text(chat_id, msg_id, new_text)
-                    .await;
+                let _ = bot.edit_message_text(chat_id, msg_id, new_text).await;
             });
         }
     };
@@ -2307,9 +2438,8 @@ async fn handle_chat(
             // For the sink, "create" returns the id of the freshly-sent
             // message. We block on the async send here. That's OK
             // because the sink only calls create once.
-            let res = futures::executor::block_on(async {
-                bot.send_message(chat_id, new_text).await
-            });
+            let res =
+                futures::executor::block_on(async { bot.send_message(chat_id, new_text).await });
             res.map(|m| m.id).map_err(|e| e.to_string())
         }
     };
@@ -2318,9 +2448,7 @@ async fn handle_chat(
         move || {
             let bot = bot.clone();
             tokio::spawn(async move {
-                let _ = bot
-                    .send_chat_action(chat_id, ChatAction::Typing)
-                    .await;
+                let _ = bot.send_chat_action(chat_id, ChatAction::Typing).await;
             });
         }
     };
@@ -2380,9 +2508,13 @@ fn build_chat_config(state: &Arc<TelegramState>) -> (Option<StreamConfig>, &'sta
                 .unwrap_or_else(|| "MiniMax-M3".into());
             let url = std::env::var("MINIMAX_API_URL")
                 .unwrap_or_else(|_| "https://api.minimax.io/v1/chat/completions".to_string());
-            let scheme = std::env::var("MINIMAX_AUTH_SCHEME")
-                .unwrap_or_else(|_| "Bearer".to_string());
-            let auth = if scheme.is_empty() { key } else { format!("{scheme} {key}") };
+            let scheme =
+                std::env::var("MINIMAX_AUTH_SCHEME").unwrap_or_else(|_| "Bearer".to_string());
+            let auth = if scheme.is_empty() {
+                key
+            } else {
+                format!("{scheme} {key}")
+            };
             return (
                 Some(StreamConfig {
                     model,
@@ -2426,34 +2558,272 @@ fn unix_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// Render a long body as one or more Telegram messages, each ≤3500 chars.
+// =====================================================================
+// UTF-16 helpers (Telegram limit = 4096 UTF-16 code units per message)
+// UTF-8: ASCII = 1 byte/char; BMP chars = 2 bytes/char; surrogates = 4 bytes/char
+// =====================================================================
+
+/// Count UTF-16 code units in a string. Surrogate pairs each count as 2.
+fn utf16_len(s: &str) -> usize {
+    s.encode_utf16().count()
+}
+
+/// Return the largest prefix of `s` whose UTF-16 length ≤ `limit`.
+fn utf16_prefix(s: &str, limit: usize) -> &str {
+    if utf16_len(s) <= limit {
+        return s;
+    }
+    let chars: Vec<char> = s.chars().collect();
+    let mut len = 0usize;
+    let mut cutoff = chars.len();
+    for (i, c) in chars.iter().enumerate() {
+        let clen = if c.is_ascii() { 1 } else { 2 };
+        if len + clen > limit {
+            cutoff = i;
+            break;
+        }
+        len += clen;
+    }
+    chars[..cutoff].iter().collect::<String>()
+}
+
+// =====================================================================
+// MarkdownV2 escape helpers
+// =====================================================================
+
+/// Escape special MarkdownV2 characters in plain text segments.
+// Special chars: _ * [ ] ( ) ~ ` > # + - = | { } . ! \
+pub fn escape_md2(s: &str) -> String {
+    static MD2_SPECIAL: &[char] = &[
+        '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!',
+        '\\',
+    ];
+    let mut out = String::with_capacity(s.len() + 16);
+    for c in s.chars() {
+        if MD2_SPECIAL.contains(&c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Escape a code-block body for MarkdownV2. Code blocks in MDV2 use
+/// triple-backticks where the content is taken literally — no escape needed
+/// for special chars inside the block. But we need to escape any triple-backtick
+/// sequences within the body itself so they don't prematurely close the block.
+fn escape_code_block(body: &str) -> String {
+    body.replace("```", "` ` `")
+}
+
+/// Render a long body as one or more Telegram messages, each ≤ 4096 UTF-16 code units.
+/// We target 3500 code units to leave headroom for the "({}/{})" header.
+const SEND_LONG_CHUNK: usize = 3500;
+
 async fn send_long(bot: &teloxide::Bot, chat_id: ChatId, body: &str) {
     use teloxide::prelude::Requester;
-    if body.len() <= 3500 {
+    if utf16_len(body) <= SEND_LONG_CHUNK {
+        let chunk = escape_code_block(body);
         let _ = bot
-            .send_message(chat_id, format!("```\n{body}\n```"))
+            .send_message(chat_id, format!("```\n{chunk}\n```"))
             .parse_mode(teloxide::types::ParseMode::MarkdownV2)
             .await;
         return;
     }
     let mut idx = 0;
     let mut part = 1;
-    let total = body.len().div_ceil(3500);
+    let total = utf16_len(body).div_ceil(SEND_LONG_CHUNK);
     while idx < body.len() {
-        let end = (idx + 3500).min(body.len());
-        let safe = body[..end].char_indices().last().map(|(i, _)| i).unwrap_or(idx);
-        let chunk = &body[idx..safe];
+        let remaining = &body[idx..];
+        let chunk = utf16_prefix(remaining, SEND_LONG_CHUNK);
+        let escaped = escape_code_block(chunk);
         let header = format!("({}/{})", part, total);
         let _ = bot
-            .send_message(chat_id, format!("{header}\n```\n{chunk}\n```"))
+            .send_message(chat_id, format!("{header}\n```\n{escaped}\n```"))
             .parse_mode(teloxide::types::ParseMode::MarkdownV2)
             .await;
-        idx = safe;
+        // Advance past the chunk we just sent
+        let consumed = chunk.len();
+        idx += consumed;
         part += 1;
         if part > 20 {
             // Avoid a runaway loop on absurd inputs.
             break;
         }
+    }
+}
+
+// =====================================================================
+// DM Topics support (Bot API 9.4+)
+// Bot API 9.4 introduced forum topics in private DMs.
+// =====================================================================
+
+use std::sync::OnceLock;
+
+/// Per-chat thread ID cache for DM topics persistence.
+static THREAD_CACHE: once_cell::sync::Lazy<std::sync::Mutex<std::collections::HashMap<i64, i32>>> =
+    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+fn thread_cache_path() -> PathBuf {
+    let base = std::env::var("LOCALAPPDATA")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".local").join("share"))
+        })
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("luna-agent").join("telegram_threads.json")
+}
+
+/// Load thread IDs from disk.
+fn load_thread_cache() -> std::collections::HashMap<i64, i32> {
+    let p = thread_cache_path();
+    match std::fs::read_to_string(&p) {
+        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+        Err(_) => Default::default(),
+    }
+}
+
+/// Save thread IDs to disk.
+fn save_thread_cache(map: &std::collections::HashMap<i64, i32>) {
+    let p = thread_cache_path();
+    if let Some(parent) = p.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(map) {
+        let _ = std::fs::write(&p, json);
+    }
+}
+
+/// Get cached thread_id for a chat, loading from disk on first call.
+fn get_cached_thread_id(chat_id: i64) -> Option<i32> {
+    static CACHED: std::sync::OnceLock<std::collections::HashMap<i64, i32>> =
+        std::sync::OnceLock::new();
+    let map = CACHED.get_or_init(load_thread_cache);
+    map.get(&chat_id).copied()
+}
+
+/// Set thread_id for a chat and persist to disk.
+fn set_cached_thread_id(chat_id: i64, thread_id: i32) {
+    let mut map = THREAD_CACHE.lock().unwrap();
+    map.insert(chat_id, thread_id);
+    save_thread_cache(&map);
+}
+
+// =====================================================================
+// Media batching (photo burst buffer)
+// Photos sent within 3 seconds are batched into an album (max 10).
+// =====================================================================
+
+use tokio::sync::mpsc;
+use tokio::time::{timeout, Duration as Td};
+
+/// A batched photo entry: file_id + when it was received.
+struct BatchedPhoto {
+    file_id: String,
+    received_at: std::time::Instant,
+}
+
+/// Photo batch state: per-chat buffer + drain task handle.
+struct PhotoBatcher {
+    /// Queue of buffered photos.
+    queue: std::collections::VecDeque<BatchedPhoto>,
+    /// When the batch window started.
+    window_start: Option<std::time::Instant>,
+    /// Max photos per batch.
+    max_photos: usize,
+    /// Window duration.
+    window_ms: u64,
+}
+
+impl Default for PhotoBatcher {
+    fn default() -> Self {
+        Self {
+            queue: std::collections::VecDeque::new(),
+            window_start: None,
+            max_photos: 10,
+            window_ms: 3000,
+        }
+    }
+}
+
+impl PhotoBatcher {
+    fn add(&mut self, file_id: String) {
+        if self.window_start.is_none() {
+            self.window_start = Some(std::time::Instant::now());
+        }
+        if self.queue.len() < self.max_photos {
+            self.queue.push_back(BatchedPhoto {
+                file_id,
+                received_at: std::time::Instant::now(),
+            });
+        }
+    }
+
+    /// Returns the batch if the window expired or max reached.
+    fn drain_if_ready(&mut self) -> Option<Vec<String>> {
+        let now = std::time::Instant::now();
+        let window = Td::from_millis(self.window_ms);
+        let expired = self
+            .window_start
+            .map(|w| now.duration_since(w) >= window)
+            .unwrap_or(false);
+        let maxed = self.queue.len() >= self.max_photos;
+
+        if expired || maxed {
+            let batch: Vec<String> = self.queue.drain(..).map(|p| p.file_id).collect();
+            self.window_start = None;
+            return Some(batch);
+        }
+        None
+    }
+
+    fn clear(&mut self) {
+        self.queue.clear();
+        self.window_start = None;
+    }
+}
+
+// =====================================================================
+// Reply threading
+// Telegram's reply_to_message_id for threading.
+// =====================================================================
+
+/// Reply mode for messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplyMode {
+    /// No threading — send as top-level message.
+    Off,
+    /// Reply to the first message in the conversation.
+    First,
+    /// Reply to the most recent message.
+    All,
+}
+
+/// Threading state: tracks the first message ID per chat.
+static THREAD_STATE: once_cell::sync::Lazy<std::sync::Mutex<std::collections::HashMap<i64, i32>>> =
+    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Track the first message ID sent in a chat (for ReplyMode::First).
+fn set_first_message_id(chat_id: i64, msg_id: i32) {
+    let mut state = THREAD_STATE.lock().unwrap();
+    state.entry(chat_id).or_insert(msg_id);
+}
+
+/// Get the first message ID for a chat.
+fn get_first_message_id(chat_id: i64) -> Option<i32> {
+    let state = THREAD_STATE.lock().unwrap();
+    state.get(&chat_id).copied()
+}
+
+/// Get the reply_to_message_id based on the current ReplyMode.
+fn get_reply_to(chat_id: i64, reply_mode: ReplyMode, last_msg_id: i32) -> Option<i32> {
+    match reply_mode {
+        ReplyMode::Off => None,
+        ReplyMode::First => get_first_message_id(chat_id),
+        ReplyMode::All => Some(last_msg_id),
     }
 }
 
@@ -2493,7 +2863,28 @@ fn safe_filename(input: &str) -> Result<String, String> {
     let stem = name.split('.').next().unwrap_or("").to_ascii_uppercase();
     if matches!(
         stem.as_str(),
-        "CON" | "PRN" | "AUX" | "NUL" | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
     ) {
         return Err(format!("reserved name: {stem}"));
     }
@@ -2527,7 +2918,12 @@ mod tests {
     fn parse_find_with_flags() {
         let c = parse_command("/find foo bar -g *.ts -r");
         match c {
-            Command::Find { query, glob, regex, case_sensitive } => {
+            Command::Find {
+                query,
+                glob,
+                regex,
+                case_sensitive,
+            } => {
                 assert_eq!(query, "foo bar");
                 assert_eq!(glob.as_deref(), Some("*.ts"));
                 assert!(regex);
@@ -2567,7 +2963,11 @@ mod tests {
     #[test]
     fn parse_create_with_template() {
         match parse_command("/create my-app vite-ts --parent /tmp") {
-            Command::Create { name, template, parent } => {
+            Command::Create {
+                name,
+                template,
+                parent,
+            } => {
                 assert_eq!(name, "my-app");
                 assert_eq!(template.as_deref(), Some("vite-ts"));
                 assert_eq!(parent.as_deref(), Some("/tmp"));
@@ -2622,6 +3022,52 @@ mod tests {
         assert!(glob_match_simple("*.ts", "foo.tsx"));
         assert!(glob_match_simple("*", "anything"));
         assert!(!glob_match_simple("*.ts", "foo.js"));
+    }
+
+    #[test]
+    fn utf16_len_ascii() {
+        assert_eq!(utf16_len("hello"), 5);
+    }
+
+    #[test]
+    fn utf16_len_unicode() {
+        // Русские буквы = BMP, 2 UTF-16 units each
+        assert_eq!(utf16_len("привет"), 12);
+        // Emoji / surrogate pairs = 2 UTF-16 units
+        assert_eq!(utf16_len("👋"), 2);
+        assert_eq!(utf16_len("hello👋world"), 14);
+    }
+
+    #[test]
+    fn utf16_prefix_truncates() {
+        assert_eq!(utf16_prefix("hello", 3), "hel");
+        // Русское слово из 6 букв = 12 units, truncate at 5 = 2 буквы
+        assert_eq!(utf16_prefix("привет", 5), "пр");
+    }
+
+    #[test]
+    fn utf16_prefix_under_limit() {
+        assert_eq!(utf16_prefix("hi", 100), "hi");
+    }
+
+    #[test]
+    fn escape_md2_basic() {
+        let out = escape_md2("hello_world");
+        assert_eq!(out, "hello\\_world");
+    }
+
+    #[test]
+    fn escape_md2_all_special_chars() {
+        let out = escape_md2("_ * [ ] ( ) ~ ` > # + - = | { } . ! \\");
+        assert!(out.starts_with("\\_ \\* \\[ \\]"));
+        // No double-escaping
+        assert!(!out.contains("\\\\_"));
+    }
+
+    #[test]
+    fn escape_code_block_triple_backtick() {
+        assert_eq!(escape_code_block("hello"), "hello");
+        assert_eq!(escape_code_block("```code```"), "` ` `code` ` `");
     }
 
     #[test]

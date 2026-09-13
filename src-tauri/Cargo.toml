@@ -44,6 +44,7 @@ regex = "1"
 toml = "0.8"
 xcap = "0.9"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+enigo = "0.3"
 base64 = "0.22"
 cpal = "0.15"
 teloxide = { version = "0.13", default-features = false, features = ["macros", "rustls"] }
