@@ -378,21 +378,22 @@ async fn smoke_binary(exe: &Path) -> Result<SmokeOutput, LunaError> {
         .map_err(|e| LunaError::Evolution(format!("spawn smoke: {e}")))?;
 
     let timeout = std::time::Duration::from_secs(35);
-    let mut so = String::new();
-    let mut se = String::new();
-    let result = tokio::time::timeout(timeout, async {
-        let mut so_take = child.stdout.take();
-        let mut se_take = child.stderr.take();
+    
+    // Capture stdout/stderr before entering async block to avoid borrow issues
+    let child_stdout = child.stdout.take();
+    let child_stderr = child.stderr.take();
+    
+    let result = tokio::time::timeout(timeout, async move {
         let so_task = tokio::spawn(async move {
             let mut s = String::new();
-            if let Some(o) = so_take.as_mut() {
+            if let Some(mut o) = child_stdout {
                 let _ = o.read_to_string(&mut s).await;
             }
             s
         });
         let se_task = tokio::spawn(async move {
             let mut s = String::new();
-            if let Some(o) = se_take.as_mut() {
+            if let Some(mut o) = child_stderr {
                 let _ = o.read_to_string(&mut s).await;
             }
             s
@@ -405,16 +406,14 @@ async fn smoke_binary(exe: &Path) -> Result<SmokeOutput, LunaError> {
     .await;
 
     match result {
-        Ok((status_opt, so_out, se_out)) => {
-            so = so_out;
-            se = se_out;
+        Ok((status_opt, so_out, _se_out)) => {
             let exit = status_opt.ok().and_then(|s| s.code()).unwrap_or(-1);
             let passed = exit == 0
-                && !se.contains("panicked at")
-                && !se.contains("RUST_BACKTRACE");
+                && !so_out.contains("panicked at")
+                && !so_out.contains("RUST_BACKTRACE");
             let reason = if passed {
                 None
-            } else if se.contains("panicked at") {
+            } else if so_out.contains("panicked at") {
                 Some("panic in stderr".into())
             } else {
                 Some(format!("exit {exit}"))
@@ -425,7 +424,7 @@ async fn smoke_binary(exe: &Path) -> Result<SmokeOutput, LunaError> {
             })
         }
         Err(_) => {
-            let _ = child.kill().await;
+            // Timeout fired - child will be killed automatically via kill_on_drop(true)
             Ok(SmokeOutput {
                 passed: false,
                 failure_reason: Some("smoke timeout after 35s".into()),

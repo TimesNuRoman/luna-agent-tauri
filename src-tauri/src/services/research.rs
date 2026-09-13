@@ -34,7 +34,6 @@ const FOLLOWUP_COUNT: usize = 3;
 /// What the frontend receives as a streaming event from `deep_research`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-#[serde Content =serde]
 pub enum ResearchEvent {
     /// A web search finished for one iteration.
     SearchDone {
@@ -125,14 +124,13 @@ struct FetchedSnippet {
 /// Run a Perplexity-style deep research session.
 /// Calls `on_event` for every step event (streaming-style).
 /// Returns the final `ResearchEvent::FinalReport` on success, or `ResearchEvent::Error`.
-pub async fn deep_research_stream<F, Fut>(
+pub async fn deep_research_stream<Fut>(
     query: String,
     max_iterations: usize,
     web_search_fn: impl Fn(String, usize) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<NewsItem>> + Send>>,
     llm_synthesize_fn: impl Fn(String, String) -> std::pin::Pin<Box<dyn std::future::Future<Output = String> + Send>>,
     on_event: impl Fn(ResearchEvent) -> Fut + Send + Sync,
 ) where
-    F: std::future::Future<Output = ()>,
     Fut: std::future::Future<Output = ()>,
 {
     let iterations = max_iterations.clamp(1, 5);

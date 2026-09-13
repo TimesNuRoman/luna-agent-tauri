@@ -56,7 +56,7 @@ pub const L0_MIN_IMPORTANCE: f32 = 0.4;
 
 /// Tracks per-event hotness state across consolidation runs.
 /// Persisted to disk as JSON so it survives app restarts.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct LifecycleState {
     /// Maps event id → hotness score (last computed).
     pub hotness: std::collections::HashMap<String, f32>,
@@ -332,10 +332,8 @@ fn prune_cold_events(
 /// Lifecycle hotness: importance-weighted frequency × exponential decay.
 /// Equivalent to OpenViking's `hotness_score()` but with importance as frequency proxy.
 fn compute_lifecycle_hotness(access_count: u32, event_ts: i64, now_ms: i64) -> f32 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     // Frequency component: sigmoid(log1p(n)) → (0, 1)
-    let freq = 1.0_f64 / (1.0 + (-access_count as f64).exp());
+    let freq = 1.0_f64 / (1.0 + (-(access_count as f64)).exp());
 
     // Recency component: exponential decay, half-life = 7 days.
     let age_seconds = ((now_ms - event_ts) as f64 / 1000.0).max(0.0);

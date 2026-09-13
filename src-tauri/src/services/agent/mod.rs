@@ -15,9 +15,16 @@
 //! - `runner.rs`         — `TaskRunner` — owns the supervisor loop, persists
 //!                         cost / status, writes `result.md`
 //!
-//! Phase M0 shipped types + store + manager. Phase M1 wires the
+// Phase M0 shipped types + store + manager. Phase M1 wires the
 //! supervisor into a real `TaskRunner` and adds `task_cancel`,
 //! `task_result`, `task_steps` Tauri commands.
+//! Phase 3 adds the ACI (Action-Context-Intent) Pattern for structured action management.
+
+// ACI Pattern — Phase 3
+pub mod action_registry;  // Action registration, schemas, and execution
+pub mod intent_classifier; // Intent classification from user messages
+pub mod action_router;    // Routes intents to registered actions
+pub mod aci_integration;  // Bridge between ACI Pattern and Supervisor
 
 pub mod cost;
 pub mod git_tools;
@@ -27,11 +34,13 @@ pub mod minimax_client;
 pub mod persona_tools;
 pub mod personas;
 pub mod progress;
+pub mod reflection;        // Phase 2: Reflection Loop
 pub mod runner;
 pub mod subagent;
 pub mod supervisor;
 pub mod task;
 pub mod task_store;
+pub mod vision_tools;     // Phase 1: Visual Grounding
 
 // Re-exports for convenience in Tauri commands.
 #[allow(unused_imports)]
@@ -57,3 +66,27 @@ pub use task::{
 };
 #[allow(unused_imports)]
 pub use task_store::{StoreError, StoreResult, TaskStore};
+
+// ACI Pattern re-exports — Phase 3
+#[allow(unused_imports)]
+pub use action_registry::{
+    Action, ActionCategory, ActionContext, ActionExecutor, ActionMetadata,
+    ActionRegistry, ActionRegistryError, ActionResult, ActionResultMetadata,
+    ActionSchema, ResourceInfo, SessionInfo, TaskInfo, UserPreferences,
+    validate_parameters, ValidationError, ValidationResult,
+};
+#[allow(unused_imports)]
+pub use intent_classifier::{
+    ClassifiedIntent, Confidence, ExtractedParameters, ExtractorType,
+    IntentCandidate, IntentCategory, IntentClassifier, IntentPattern,
+    ParameterExtractor,
+};
+#[allow(unused_imports)]
+pub use action_router::{
+    ActionRoute, RouteResult, RouterConfig,
+};
+#[allow(unused_imports)]
+pub use aci_integration::{
+    create_supervisor_registry, filter_tools_for_intent, get_supervisor_registry,
+    registry_to_minimax_tools, supervisor_tools_from_registry, ActionRouter as AciActionRouter,
+};

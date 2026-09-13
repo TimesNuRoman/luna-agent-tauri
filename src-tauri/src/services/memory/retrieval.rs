@@ -50,7 +50,7 @@ pub fn hotness_score(active_count: u32, updated_at_ms: Option<i64>, now_ms: i64)
 
     // --- frequency component: sigmoid(log1p(n)) ---
     // sigmoid(x) = 1 / (1 + exp(-x))
-    let freq = 1.0_f64 / (1.0 + (-active_count as f64).exp());
+    let freq = 1.0_f64 / (1.0 + (-(active_count as f64)).exp());
 
     // --- recency component: exponential decay with half-life ---
     let Some(updated_at_ms) = updated_at_ms else {
@@ -70,7 +70,7 @@ pub fn hotness_score(active_count: u32, updated_at_ms: Option<i64>, now_ms: i64)
 /// Access-tracker for hotness. Maintains `active_count` per event id.
 /// When an event is retrieved, call `bump(id)`. The tracker auto-evicts
 /// entries older than `evict_after_ms` to bound memory growth.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct AccessTracker {
     /// Maps event id → (access_count, last_access_ms)
     entries: HashMap<String, (u32, i64)>,
@@ -83,6 +83,14 @@ impl AccessTracker {
         Self {
             entries: HashMap::with_capacity(evict_threshold * 2),
             evict_threshold,
+        }
+    }
+
+    /// Clone the tracker contents.
+    pub fn clone(&self) -> Self {
+        Self {
+            entries: self.entries.clone(),
+            evict_threshold: self.evict_threshold,
         }
     }
 
@@ -100,7 +108,7 @@ impl AccessTracker {
             // Never accessed — return a neutral score based on age only.
             return hotness_score(0, Some(ts), now_ms);
         };
-        hotness_score(count.saturating_sub(1), Some(last_access), now_ms)
+        hotness_score(count.saturating_sub(1), Some(*last_access), now_ms)
     }
 
     /// Prune entries not accessed in the last `stale_ms` milliseconds.
@@ -128,15 +136,15 @@ fn rrf_score(rank: usize) -> f32 {
 /// `k = 60` (OpenViking default).
 ///
 /// Returns a map from hit id → fused RRF score.
-pub fn rrf_fuse<'a>(
-    lists: impl IntoIterator<Item = (&'a str, Vec<RecallHit>)>,
-) -> HashMap<&'a str, f32> {
-    let mut scores: HashMap<&str, f32> = HashMap::new();
+pub fn rrf_fuse(
+    lists: impl IntoIterator<Item = (String, Vec<RecallHit>)>,
+) -> HashMap<String, f32> {
+    let mut scores: HashMap<String, f32> = HashMap::new();
 
-    for (layer, hits) in lists {
+    for (_layer, hits) in lists {
         for (rank, hit) in hits.iter().enumerate() {
             let score = rrf_score(rank + 1);
-            *scores.entry(&hit.id).or_insert(0.0) += score;
+            *scores.entry(hit.id.clone()).or_insert(0.0) += score;
         }
     }
 
@@ -246,13 +254,13 @@ pub fn assemble_bundle(
 
     // Step 1: RRF fusion across all layers.
     let fused = rrf_fuse([
-        ("l1", search_l1(&query, l1_events)),
-        ("l2", l2_hits),
-        ("graph", graph_hits),
+        ("l1".to_string(), search_l1(&query, l1_events)),
+        ("l2".to_string(), l2_hits),
+        ("graph".to_string(), graph_hits),
     ]);
 
     // Step 2: Sort by fused score, take top-k candidates.
-    let mut sorted: Vec<(&str, f32)> = fused.into_iter().collect();
+    let mut sorted: Vec<(String, f32)> = fused.into_iter().collect();
     sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     let top_ids: Vec<_> = sorted
         .into_iter()
@@ -293,9 +301,9 @@ pub fn assemble_bundle(
         l1_events.iter().map(|e| (e.id.as_str(), e)).collect();
 
     let mut hits: Vec<RecallHit> = Vec::new();
-    let mut l1_count = 0u32;
-    let mut l2_count = 0u32;
-    let mut graph_count = 0u32;
+    let mut l1_count = 0usize;
+    let mut l2_count = 0usize;
+    let mut graph_count = 0usize;
 
     for (id, _) in scored.into_iter().take(query.top_k) {
         let id_str = id.as_str();
@@ -340,11 +348,10 @@ pub fn assemble_bundle(
         query: query.query,
         hits,
         counts: RecallCounts {
+            l0: 0,
             l1: l1_count,
             l2: l2_count,
             l3: 0,
-            graph: graph_count,
-            total,
         },
         partial: l2_count > 0 || graph_count > 0,
         elapsed_ms: start.elapsed().as_millis() as u64,
@@ -466,7 +473,7 @@ mod tests {
             ts: 0,
         }];
 
-        let fused = rrf_fuse([("l1", hits_a), ("l2", hits_b)]);
+        let fused = rrf_fuse([("l1".to_string(), hits_a), ("l2".to_string(), hits_b)]);
         // 'y' appears in both lists → higher fused score than 'x'.
         let y_score = fused.get("y").copied().unwrap_or(0.0);
         let x_score = fused.get("x").copied().unwrap_or(0.0);

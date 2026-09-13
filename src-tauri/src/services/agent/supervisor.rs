@@ -34,10 +34,12 @@ use super::persona_tools::{
     is_persona_tool, PersonaPayloadSink, PersonaToolContext,
 };
 use super::progress::ProgressEmitter;
+use super::reflection::{Reflection, Reflector, Trace, TraceStep, ReflectionConfig};
 use super::task::{Task, TaskStep};
 use crate::services::evolver::inspect; // for resolve_source_root
 use crate::services::shell;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
@@ -117,6 +119,36 @@ pub fn supervisor_tools() -> Vec<MinimaxTool> {
                         "prompt": { "type": "string", "description": "The focused sub-task for the sub-agent (e.g. 'Find all uses of X in the codebase and summarise')." }
                     },
                     "required": ["prompt"]
+                }),
+            },
+        },
+        // Phase 1: Visual Grounding tool
+        MinimaxTool {
+            kind: "function".into(),
+            function: MinimaxToolFunction {
+                name: "vision_grounding".into(),
+                description: "Capture the current screen and analyze it with vision AI. Use this when you need to see what's on the user's screen to answer a question or make a decision.".into(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "The question or analysis request about the screen content." },
+                        "monitor_id": { "type": "integer", "description": "Optional monitor ID (0 = primary).", "default": 0 }
+                    },
+                    "required": ["query"]
+                }),
+            },
+        },
+        // Phase 2: Reflection tool
+        MinimaxTool {
+            kind: "function".into(),
+            function: MinimaxToolFunction {
+                name: "reflect_on_trace".into(),
+                description: "Analyze the current execution trace and produce a self-reflection. Use this to learn from mistakes and improve future performance.".into(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "focus": { "type": "string", "description": "Optional focus area for reflection (e.g. 'error_analysis', 'efficiency', 'completeness')." }
+                    }
                 }),
             },
         },
@@ -215,6 +247,7 @@ pub async fn execute_tool(
     task: &Task,
     persona_ctx: Option<&PersonaToolContext>,
     payload_sink: Option<&PersonaPayloadSink>,
+    trace_buffer: &TraceBuffer,
 ) -> ToolOutcome {
     // Persona tools first (no source_root needed).
     if is_persona_tool(name) {
@@ -245,11 +278,49 @@ pub async fn execute_tool(
         "list_dir" => tool_list_dir(args, &source_root).await,
         "search_workspace" => tool_search_workspace(args, &source_root).await,
         "run_command" => tool_run_command(args, &source_root).await,
+        "vision_grounding" => tool_vision_grounding(args).await,
+        "reflect_on_trace" => {
+            tool_reflect_on_trace(args, trace_buffer).await
+        },
         n if git_tools::is_git_tool(n) => git_tools::execute(n, args, &source_root).await,
         _ => ToolOutcome {
             content: format!("error: unknown tool '{name}'"),
             is_error: true,
         },
+    }
+}
+
+/// Trace buffer for reflection - stores recent steps for analysis
+pub struct TraceBuffer {
+    steps: Vec<TraceStep>,
+    prompt: String,
+}
+
+impl TraceBuffer {
+    pub fn new(prompt: String) -> Self {
+        Self {
+            steps: Vec::new(),
+            prompt,
+        }
+    }
+    
+    pub fn add_step(&mut self, tool_name: String, tool_args: serde_json::Value, tool_result: String, had_error: bool) {
+        self.steps.push(TraceStep {
+            step: self.steps.len() as u32 + 1,
+            tool_name: Some(tool_name),
+            tool_args: Some(tool_args),
+            tool_result,
+            had_error,
+        });
+    }
+    
+    pub fn to_trace(&self, final_response: Option<String>, success: bool) -> Trace {
+        Trace {
+            prompt: self.prompt.clone(),
+            steps: self.steps.clone(),
+            final_response,
+            success,
+        }
     }
 }
 
@@ -399,6 +470,104 @@ async fn tool_run_command(args: &serde_json::Value, source_root: &std::path::Pat
     }
 }
 
+/// Phase 1: Visual Grounding - capture screen and analyze with vision AI.
+async fn tool_vision_grounding(args: &serde_json::Value) -> ToolOutcome {
+    let query = match args.get("query").and_then(|v| v.as_str()) {
+        Some(q) => q,
+        None => return ToolOutcome { content: "error: 'query' is required".into(), is_error: true },
+    };
+    let monitor_id = args.get("monitor_id").and_then(|v| v.as_u64()).map(|v| v as u32);
+    
+    let request = super::vision_tools::VisionGroundingRequest {
+        query: query.to_string(),
+        monitor_id,
+        max_tokens: Some(300),
+    };
+    
+    let response = super::vision_tools::execute_vision_grounding(&request, None).await;
+    
+    if response.success {
+        let result = format!(
+            "Screen Analysis ({}x{}, monitor {}):\n\n{}\n\nFrame info: seq={}, t={}ms",
+            response.frame.width,
+            response.frame.height,
+            response.frame.monitor_id,
+            response.analysis,
+            response.frame.seq,
+            response.frame.t_ms
+        );
+        ToolOutcome { content: result, is_error: false }
+    } else {
+        ToolOutcome {
+            content: format!("error: screen capture failed: {}", response.error.unwrap_or_default()),
+            is_error: true,
+        }
+    }
+}
+
+/// Phase 2: Reflection - analyze the execution trace and produce a reflection.
+/// 
+/// This tool analyzes the accumulated steps in the trace buffer and generates
+/// a self-reflection that can be used to improve future performance.
+async fn tool_reflect_on_trace(
+    args: &serde_json::Value,
+    trace_buffer: &TraceBuffer,
+) -> ToolOutcome {
+    let focus = args.get("focus").and_then(|v| v.as_str()).unwrap_or("");
+    
+    // Build the trace from the buffer
+    let trace = trace_buffer.to_trace(None, true); // Success unknown at this point
+    
+    // Create a simple reflection without LLM (LLM reflection is expensive)
+    // For full LLM-based reflection, use the Reflector directly
+    let reflection_text = generate_simple_reflection(&trace, focus);
+    
+    ToolOutcome {
+        content: reflection_text,
+        is_error: false,
+    }
+}
+
+/// Generate a simple heuristic-based reflection without LLM.
+/// This is used when the expensive LLM reflection is disabled.
+fn generate_simple_reflection(trace: &Trace, _focus: &str) -> String {
+    let total_steps = trace.steps.len();
+    let error_steps = trace.steps.iter().filter(|s| s.had_error).count();
+    
+    let mut analysis = format!(
+        "Reflection Summary:\n\
+        ==================\n\
+        Total steps: {}\n\
+        Error steps: {}\n\
+        \n",
+        total_steps, error_steps
+    );
+    
+    if error_steps > 0 {
+        analysis.push_str("Issues Identified:\n");
+        for (i, step) in trace.steps.iter().enumerate() {
+            if step.had_error {
+                analysis.push_str(&format!(
+                    "  - Step {} ({}): {}\n",
+                    i + 1,
+                    step.tool_name.as_deref().unwrap_or("unknown"),
+                    step.tool_result.chars().take(200).collect::<String>()
+                ));
+            }
+        }
+        analysis.push_str("\nRecommendations:\n");
+        if error_steps > total_steps / 2 {
+            analysis.push_str("  - High error rate detected. Consider reviewing the approach.\n");
+        }
+        analysis.push_str("  - Use reflect_on_trace more frequently to catch issues early.\n");
+    } else {
+        analysis.push_str("No errors detected in the trace.\n");
+        analysis.push_str("Consider using dispatch_subagent to parallelize remaining work.\n");
+    }
+    
+    analysis
+}
+
 // =====================================================================
 // Supervisor loop
 // =====================================================================
@@ -441,6 +610,12 @@ pub async fn run_loop(
     let mut sub_agent_cost_chunks: Vec<CostChunk> = Vec::new();
     let mut steps_completed: u32 = 0;
     let mut files_read: Vec<String> = Vec::new();
+    
+    // Phase 2: Initialize trace buffer for reflection
+    let mut trace_buffer = TraceBuffer::new(task.prompt.clone());
+    
+    // Phase 1: Get capture state for vision grounding if available
+    let capture_state: Option<()> = None; // Would be populated from AppState if available
 
     loop {
         // Cooperative cancel.
@@ -593,8 +768,18 @@ pub async fn run_loop(
                 task,
                 persona_ctx.as_ref(),
                 payload_sink.as_ref(),
+                &trace_buffer,
             )
             .await;
+            
+            // Phase 2: Track step for reflection
+            trace_buffer.add_step(
+                call.function.name.clone(),
+                args.clone(),
+                outcome.content.clone(),
+                outcome.is_error,
+            );
+            
             progress.emit(&TaskStep::ToolResult {
                 ts: chrono::Utc::now(),
                 tool_use_id: call.id.clone(),
@@ -662,12 +847,15 @@ mod tests {
     #[test]
     fn supervisor_tools_have_four_entries() {
         let t = supervisor_tools();
-        assert_eq!(t.len(), 4);
+        // Phase 1 + 2 added vision_grounding and reflect_on_trace
+        assert!(t.len() >= 6, "Expected at least 6 tools, got {}", t.len());
         let names: Vec<&str> = t.iter().map(|x| x.function.name.as_str()).collect();
         assert!(names.contains(&"read_file"));
         assert!(names.contains(&"list_dir"));
         assert!(names.contains(&"search_workspace"));
         assert!(names.contains(&"run_command"));
+        assert!(names.contains(&"vision_grounding"), "vision_grounding should be present");
+        assert!(names.contains(&"reflect_on_trace"), "reflect_on_trace should be present");
     }
 
     #[test]
@@ -686,7 +874,8 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let task = dummy_task();
-            let r = execute_tool("nope", &serde_json::json!({}), &task, None, None).await;
+            let trace = TraceBuffer::new("test".into());
+            let r = execute_tool("nope", &serde_json::json!({}), &task, None, None, &trace).await;
             assert!(r.is_error);
             assert!(r.content.contains("unknown tool"));
         });
@@ -697,7 +886,8 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let task = dummy_task();
-            let r = execute_tool("read_file", &serde_json::json!({}), &task, None, None).await;
+            let trace = TraceBuffer::new("test".into());
+            let r = execute_tool("read_file", &serde_json::json!({}), &task, None, None, &trace).await;
             assert!(r.is_error);
             assert!(r.content.contains("'path' is required"));
         });
@@ -708,12 +898,14 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let task = dummy_task();
+            let trace = TraceBuffer::new("test".into());
             let r = execute_tool(
                 "list_dir",
                 &serde_json::json!({ "path": ".", "depth": 0 }),
                 &task,
                 None,
                 None,
+                &trace,
             )
             .await;
             assert!(!r.content.is_empty() || r.is_error);

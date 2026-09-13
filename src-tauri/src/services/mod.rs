@@ -1,11 +1,16 @@
 pub mod agent;
+pub mod artemis;
 pub mod azazel;
 pub mod chat_sink;
+pub mod code_agent;
 pub mod credentials;
 pub mod daimonion;
+pub mod debug_agent;
 pub mod design;
 pub mod evolver;
+pub mod knowledge_base;
 pub mod memory;
+pub mod mock_provider;
 pub mod morningstar;
 pub mod research;
 pub mod shell;

@@ -9,7 +9,7 @@ use tauri::image::Image;
 
 use std::process::Stdio;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex, LazyLock};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
@@ -207,45 +207,6 @@ pub struct AppState {
     /// `Arc`-backed handle into the same registry managed by
     /// `TaskDeps::personas`.
     pub personas: Arc<services::agent::personas::PersonaRegistry>,
-    /// M4 token cost tracker — accumulates usage across chat turns within
-    /// the current app session. Exposed to UI via `get_session_cost`.
-    pub session_cost: parking_lot::Mutex<SessionCostTracker>,
-}
-
-/// Process-global session cost tracker. Written by minimax_chat_stream after
-/// every turn; read by the `get_session_cost` Tauri command.
-pub static SESSION_COST: LazyLock<parking_lot::Mutex<SessionCostTracker>> =
-    LazyLock::new(|| parking_lot::Mutex::new(SessionCostTracker::new()));
-
-/// M4: returns the current session's token usage and cost breakdown.
-/// Called by the frontend to display the cost bar in the UI.
-#[tauri::command]
-fn get_session_cost() -> serde_json::Value {
-    let tracker = SESSION_COST.lock();
-    let estimated_monthly = tracker.estimated_monthly_usd();
-    serde_json::json!({
-        "input_tokens": tracker.input_tokens,
-        "output_tokens": tracker.output_tokens,
-        "estimated_usd": tracker.estimated_usd,
-        "turns": tracker.turns,
-        "session_duration_ms": {
-            "start": tracker.session_start_ms,
-            "now": std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0)
-        },
-        "estimated_monthly_usd": estimated_monthly,
-        "by_model": tracker.by_model,
-        // MiniMax M3 pricing reference for the UI to show "remaining budget".
-        // Default $5/month budget, configurable in Settings later.
-        "budget_usd": 5.0,
-        "budget_used_pct": if estimated_monthly > 0.0 {
-            (estimated_monthly / 5.0 * 100.0).min(100.0)
-        } else {
-            0.0
-        },
-    })
 }
 
 /// Payload of a `video-auto-trigger` event. Stored in
@@ -261,79 +222,6 @@ pub struct AutoInvokePayload {
     pub height: u32,
     pub goal: String,
     pub t_ms: u128,
-}
-
-/// M4 token cost tracking — accumulates usage within a session window.
-/// Reset on app restart. Exposed to UI via `get_session_cost` command.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SessionCostTracker {
-    /// Input tokens consumed this session.
-    pub input_tokens: u64,
-    /// Output tokens consumed this session.
-    pub output_tokens: u64,
-    /// Estimated USD (recomputed from token counts at read time).
-    pub estimated_usd: f64,
-    /// Chat turns in this session.
-    pub turns: u32,
-    /// Session start (epoch ms).
-    pub session_start_ms: u64,
-    /// Per-model breakdown.
-    pub by_model: std::collections::HashMap<String, ModelCostSnapshot>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelCostSnapshot {
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub estimated_usd: f64,
-    pub turns: u32,
-}
-
-impl SessionCostTracker {
-    pub fn new() -> Self {
-        Self {
-            session_start_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0),
-            ..Default::default()
-        }
-    }
-
-    /// Record tokens from one chat turn. `usd` is the precomputed cost.
-    pub fn record(&mut self, model: &str, input_tokens: u64, output_tokens: u64, usd: f64) {
-        self.input_tokens += input_tokens;
-        self.output_tokens += output_tokens;
-        self.estimated_usd += usd;
-        self.turns += 1;
-        let snap = self.by_model.entry(model.to_string()).or_default();
-        snap.input_tokens += input_tokens;
-        snap.output_tokens += output_tokens;
-        snap.estimated_usd += usd;
-        snap.turns += 1;
-    }
-
-    /// Returns estimated monthly spend assuming linear extrapolation from
-    /// this session's duration. Returns 0 if session < 1 minute.
-    pub fn estimated_monthly_usd(&self) -> f64 {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs() as u64)
-            .unwrap_or(0);
-        let session_secs = now.saturating_sub(self.session_start_ms / 1000);
-        if session_secs < 60 {
-            return 0.0;
-        }
-        // sessions_per_month ≈ 30 days × 24h × (sessions/day)
-        let sessions_this_session = if session_secs >= 3600 {
-            // assume one session = 1 hour of active use
-            (session_secs as f64 / 3600.0).max(1.0)
-        } else {
-            1.0
-        };
-        let sessions_per_month = sessions_this_session * 30.0;
-        (self.estimated_usd / sessions_this_session) * sessions_per_month
-    }
 }
 
 /// Hard cap on the in-memory undo stack. 50 РІвЂ°в‚¬ enough for one full agent
@@ -2021,13 +1909,10 @@ async fn ai_chat_stream(req: ChatRequest, app: AppHandle) -> Result<(), String> 
     let mut stream = res.bytes_stream();
     let mut buffer = String::new();
     let mut carry: Vec<u8> = Vec::new();
-    // M4 token tracking — accumulate input/output from Anthropic SSE events.
-    let mut anthropic_input_tokens: u64 = 0;
-    let mut anthropic_output_tokens: u64 = 0;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| e.to_string())?;
         push_chunk_text(&mut buffer, &mut carry, &chunk);
-        // SSE: events separated by blank lines.
+        // SSE: РЎРѓР С•Р В±РЎвЂ№РЎвЂљР С‘РЎРЏ РЎР‚Р В°Р В·Р Т‘Р ВµР В»Р ВµР Р…РЎвЂ№ \n\n, Р С”Р В°Р В¶Р Т‘Р С•Р Вµ Р С‘Р СР ВµР ВµРЎвЂљ Р С—Р С•Р В»РЎРЏ Р Р†Р С‘Р Т‘Р В° "data: {...}".
         while let Some(idx) = buffer.find("\n\n") {
             let event = buffer[..idx].to_string();
             buffer = buffer[idx + 2..].to_string();
@@ -2038,24 +1923,6 @@ async fn ai_chat_stream(req: ChatRequest, app: AppHandle) -> Result<(), String> 
                         continue;
                     }
                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(rest) {
-                        // message_start carries input_tokens in usage.
-                        if v.get("type").and_then(|t| t.as_str()) == Some("message_start") {
-                            if let Some(usage) = v.get("message")
-                                .and_then(|m| m.get("usage"))
-                            {
-                                if let Some(n) = usage.get("input_tokens").and_then(|x| x.as_u64()) {
-                                    anthropic_input_tokens = n;
-                                }
-                            }
-                        }
-                        // message_delta carries output_tokens in usage (cumulative).
-                        if v.get("type").and_then(|t| t.as_str()) == Some("message_delta") {
-                            if let Some(usage) = v.get("usage") {
-                                if let Some(n) = usage.get("output_tokens").and_then(|x| x.as_u64()) {
-                                    anthropic_output_tokens = n;
-                                }
-                            }
-                        }
                         if let Some(delta) = v.get("delta").and_then(|d| d.get("text")).and_then(|t| t.as_str()) {
                             let _ = app.emit("ai_chunk", delta.to_string());
                         }
@@ -2071,24 +1938,6 @@ async fn ai_chat_stream(req: ChatRequest, app: AppHandle) -> Result<(), String> 
         }
     }
     let _ = app.emit("ai_done", true);
-
-    // M4: log token usage from this chat turn.
-    if anthropic_input_tokens > 0 || anthropic_output_tokens > 0 {
-        let model = &model;
-        let cost = services::agent::cost::estimate_response_usd(
-            model,
-            anthropic_input_tokens,
-            anthropic_output_tokens,
-        );
-        tracing::debug!(
-            input = anthropic_input_tokens,
-            output = anthropic_output_tokens,
-            usd = cost,
-            model = model,
-            "ai_chat_stream: token usage"
-        );
-        // TODO(r5): accumulate into a session-level cost tracker exposed via UI.
-    }
     // ---- M4: fact extraction spawn. Fire-and-forget; never
     // blocks the chat. After each chat turn, we extract atomic facts
     // from the last 6 messages and dispatch them into L1 + L2 + graph.
@@ -3049,9 +2898,6 @@ async fn minimax_chat_stream(
         // to silence this in production.
         let mut first_event_logged = false;
         let minimax_debug = std::env::var("MINIMAX_DEBUG").ok().as_deref() == Some("1");
-        // M4 token tracking — accumulate input/output from MiniMax SSE usage events.
-        let mut mm_input_tokens: u64 = 0;
-        let mut mm_output_tokens: u64 = 0;
         if minimax_debug {
             let tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0);
             eprintln!(
@@ -3135,15 +2981,6 @@ async fn minimax_chat_stream(
                     // finish_reason is emitted in the last chunk alongside an empty delta
                     if let Some(fr) = choice.get("finish_reason").and_then(|f| f.as_str()) {
                         finish_reason = Some(fr.to_string());
-                    }
-                    // M4: MiniMax sends usage in the last SSE chunk.
-                    if let Some(usage) = v.get("usage") {
-                        if let Some(n) = usage.get("prompt_tokens").and_then(|x| x.as_u64()) {
-                            mm_input_tokens = n;
-                        }
-                        if let Some(n) = usage.get("completion_tokens").and_then(|x| x.as_u64()) {
-                            mm_output_tokens = n;
-                        }
                     }
                 }
             }
@@ -5432,27 +5269,8 @@ async fn minimax_chat_stream(
             }
         }
     }
-    // Fell off the iteration cap — surface as graceful completion.
+    // Fell off the iteration cap РІР‚вЂќ surface as graceful completion.
     let _ = app.emit("ai_done", true);
-
-    // M4: log token usage from this MiniMax chat turn.
-    if mm_input_tokens > 0 || mm_output_tokens > 0 {
-        let cost = services::agent::cost::estimate_response_usd(
-            &model,
-            mm_input_tokens,
-            mm_output_tokens,
-        );
-        tracing::info!(
-            input_tokens = mm_input_tokens,
-            output_tokens = mm_output_tokens,
-            usd = cost,
-            model = %model,
-            "minimax_chat_stream: turn cost"
-        );
-        // Accumulate into the global session tracker for UI display.
-        SESSION_COST.lock().record(&model, mm_input_tokens, mm_output_tokens, cost);
-    }
-
     Ok(())
 }
 
@@ -5642,7 +5460,6 @@ async fn call_minimax(
 // copy of the graph.
 
 use services::three_d as td;
-use services::research::ResearchEvent;
 
 #[tauri::command]
 fn three_d_apply_ops(
@@ -6377,86 +6194,6 @@ fn web_search_cache_stats() -> serde_json::Value {
         "ttl_secs": CACHE_TTL_SECS,
         "max_entries": CACHE_MAX_ENTRIES,
     })
-}
-
-// =====================================================================
-// Perplexity-style deep research
-// =====================================================================
-
-#[tauri::command]
-async fn deep_research(
-    app: tauri::AppHandle,
-    query: String,
-    max_iterations: Option<usize>,
-) -> Result<(), String> {
-    use tauri::Emitter;
-
-    let iterations = max_iterations.unwrap_or(3).clamp(1, 5);
-
-    // Web search via the existing web_search function.
-    async fn do_web_search(query: String, limit: usize) -> Vec<crate::NewsItem> {
-        crate::web_search(query, limit as u32)
-            .await
-            .unwrap_or_default()
-    }
-
-    // LLM call via minimax_chat_stream.
-    async fn do_llm(system: String, user: String) -> String {
-        use std::sync::Arc;
-        use parking_lot::Mutex;
-        use crate::MiniMaxConfig;
-
-        let config = MiniMaxConfig::default();
-
-        let system_msg = crate::ChatMessage {
-            role: "system".to_string(),
-            content: system,
-        };
-        let user_msg = crate::ChatMessage {
-            role: "user".to_string(),
-            content: user,
-        };
-
-        let collected = Arc::new(Mutex::new(String::new()));
-        let collected_clone = collected.clone();
-
-        let result = crate::minimax_chat_stream(
-            config,
-            vec![system_msg, user_msg],
-            None,
-            None,
-            Some(Box::new(move |text: String| {
-                *collected_clone.lock() += &text;
-            })),
-        )
-        .await;
-
-        match result {
-            Ok(_) => Arc::try_unwrap(collected).unwrap().into_inner(),
-            Err(e) => {
-                eprintln!("[deep_research] LLM call failed: {}", e);
-                String::new()
-            }
-        }
-    }
-
-    let app_clone = app.clone();
-
-    research::deep_research_stream(
-        query,
-        iterations,
-        |q, lim| Box::pin(do_web_search(q, lim)),
-        |sys, usr| Box::pin(do_llm(sys, usr)),
-        move |event| {
-            let app = app_clone.clone();
-            async move {
-                let _ = app.emit("research_event", &event);
-            }
-        },
-    )
-    .await;
-
-    Ok(())
 }
 
 async fn build_client() -> Result<reqwest::Client, String> {
@@ -10040,7 +9777,6 @@ pub fn run() {
             // D: AI
             ai_chat_stream,
             minimax_chat_stream,
-            get_session_cost,
             // Existing
             call_minimax,
             generate_image_minimax,
@@ -10051,7 +9787,6 @@ pub fn run() {
             web_search,
             clear_web_search_cache,
             web_search_cache_stats,
-            deep_research,
             // Chat history
             save_chat,
             list_chats,

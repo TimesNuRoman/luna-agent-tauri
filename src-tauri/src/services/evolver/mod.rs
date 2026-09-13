@@ -17,6 +17,7 @@
 //! and can run concurrently with an in-flight cycle.
 
 pub mod diagnose;
+pub mod debug;
 pub mod feedback;
 pub mod inspect;
 pub mod planner;

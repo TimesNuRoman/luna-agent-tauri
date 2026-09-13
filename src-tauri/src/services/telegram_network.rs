@@ -210,20 +210,22 @@ impl TelegramNetworkState {
 
     /// Get current sticky IP, or resolve via DoH if stale/missing.
     pub async fn get_or_resolve_ip(&self) -> Option<IpAddr> {
-        let mut state = self.state.write().await;
         let now = std::time::Instant::now();
 
-        let needs_resolve = state.sticky_ip.is_none()
-            || state
-                .sticky_ip_resolved_at
-                .map(|t| now.duration_since(t) > IP_CACHE_TTL)
-                .unwrap_or(true);
+        let (needs_resolve, current_ip) = {
+            let state_guard = self.state.read().await;
+            let needs = state_guard.sticky_ip.is_none()
+                || state_guard
+                    .sticky_ip_resolved_at
+                    .map(|t| now.duration_since(t) > IP_CACHE_TTL)
+                    .unwrap_or(true);
+            let ip = state_guard.sticky_ip;
+            (needs, ip)
+        };
 
         if !needs_resolve {
-            return state.sticky_ip;
+            return current_ip;
         }
-
-        drop(state); // release write lock before async
 
         let ip = resolve_api_ip(&self.client, "api.telegram.org").await;
 
@@ -251,7 +253,9 @@ impl TelegramNetworkState {
             }
         }
 
-        state.sticky_ip
+        let state = self.state.read().await;
+        let ip = state.sticky_ip.clone();
+        ip
     }
 
     /// Mark current sticky IP as confirmed working (reset failure state).

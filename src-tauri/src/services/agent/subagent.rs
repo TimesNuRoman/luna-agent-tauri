@@ -176,10 +176,11 @@ pub async fn dispatch_subagent(
             content: if response.content.is_empty() { None } else { Some(response.content.clone()) },
             tool_calls: response.tool_calls.clone(),
         });
+        let trace_buffer = super::supervisor::TraceBuffer::new("subagent".into());
         for call in &response.tool_calls {
             let args: serde_json::Value = serde_json::from_str(&call.function.arguments)
                 .unwrap_or(serde_json::Value::Null);
-            let outcome = execute_tool(&call.function.name, &args, task, None, None).await;
+            let outcome = execute_tool(&call.function.name, &args, task, None, None, &trace_buffer).await;
             messages.push(MinimaxMessage::Tool {
                 tool_call_id: call.id.clone(),
                 content: if outcome.content.len() > 4000 {

@@ -135,18 +135,21 @@ pub async fn send_document_native(
     file_path: &Path,
     caption: Option<&str>,
 ) -> Result<teloxide::types::Message, String> {
-    let file = tokio::fs::File::open(file_path)
-        .await
-        .map_err(|e| format!("open file: {e}"))?;
-    let filename = file_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("file");
-    let mut req = bot.send_document(chat_id, teloxide::payloads::InputFile::file(file, filename));
-    if let Some(cap) = caption {
-        req = req.caption(cap);
+    use teloxide::prelude::Requester;
+    use teloxide::types::InputMedia;
+
+    let inp = teloxide::types::InputFile::file(file_path.to_path_buf());
+    let mut media = teloxide::types::InputMediaDocument::new(inp);
+    if let Some(c) = caption {
+        media = media.caption(c);
     }
-    req.await.map_err(|e| format!("send_document: {e}"))
+    let msgs = bot
+        .send_media_group(chat_id, [InputMedia::Document(media)])
+        .await
+        .map_err(|e| format!("send_document: {e}"))?;
+    msgs.into_iter()
+        .next()
+        .ok_or_else(|| "send_document: empty response".into())
 }
 
 /// Send a video file to a chat, with optional caption.
@@ -156,18 +159,21 @@ pub async fn send_video_native(
     file_path: &Path,
     caption: Option<&str>,
 ) -> Result<teloxide::types::Message, String> {
-    let file = tokio::fs::File::open(file_path)
-        .await
-        .map_err(|e| format!("open file: {e}"))?;
-    let filename = file_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("video.mp4");
-    let mut req = bot.send_video(chat_id, teloxide::payloads::InputFile::file(file, filename));
-    if let Some(cap) = caption {
-        req = req.caption(cap);
+    use teloxide::prelude::Requester;
+    use teloxide::types::InputMedia;
+
+    let inp = teloxide::types::InputFile::file(file_path.to_path_buf());
+    let mut media = teloxide::types::InputMediaVideo::new(inp);
+    if let Some(c) = caption {
+        media = media.caption(c);
     }
-    req.await.map_err(|e| format!("send_video: {e}"))
+    let msgs = bot
+        .send_media_group(chat_id, [InputMedia::Video(media)])
+        .await
+        .map_err(|e| format!("send_video: {e}"))?;
+    msgs.into_iter()
+        .next()
+        .ok_or_else(|| "send_video: empty response".into())
 }
 
 /// Send an image file to a chat, with optional caption.
@@ -177,18 +183,21 @@ pub async fn send_image_native(
     file_path: &Path,
     caption: Option<&str>,
 ) -> Result<teloxide::types::Message, String> {
-    let file = tokio::fs::File::open(file_path)
-        .await
-        .map_err(|e| format!("open file: {e}"))?;
-    let filename = file_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("image.jpg");
-    let mut req = bot.send_photo(chat_id, teloxide::payloads::InputFile::file(file, filename));
-    if let Some(cap) = caption {
-        req = req.caption(cap);
+    use teloxide::prelude::Requester;
+    use teloxide::types::InputMedia;
+
+    let inp = teloxide::types::InputFile::file(file_path.to_path_buf());
+    let mut media = teloxide::types::InputMediaPhoto::new(inp);
+    if let Some(c) = caption {
+        media = media.caption(c);
     }
-    req.await.map_err(|e| format!("send_image: {e}"))
+    let msgs = bot
+        .send_media_group(chat_id, [InputMedia::Photo(media)])
+        .await
+        .map_err(|e| format!("send_photo: {e}"))?;
+    msgs.into_iter()
+        .next()
+        .ok_or_else(|| "send_photo: empty response".into())
 }
 
 /// Send a media album (group) from file paths (photos only).
@@ -200,20 +209,15 @@ pub async fn send_media_album(
     caption: Option<&str>,
 ) -> Result<Vec<teloxide::types::Message>, String> {
     use teloxide::prelude::Requester;
-    use teloxide::types::InputMediaPhoto;
+    use teloxide::types::{InputMedia, InputMediaPhoto};
 
     let chunks: Vec<_> = file_paths.chunks(10).collect();
     let mut messages = Vec::new();
     for (i, chunk) in chunks.iter().enumerate() {
-        let medias: Vec<InputMediaPhoto> = chunk
+        let medias: Vec<InputMedia> = chunk
             .iter()
             .map(|p| {
-                let file = std::fs::File::open(p).expect("file exists");
-                let name = p
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("photo.jpg");
-                let media = teloxide::payloads::InputFile::file(file, name);
+                let media = teloxide::types::InputFile::file(p.to_path_buf());
                 let mut inp = InputMediaPhoto::new(media);
                 // Only add caption to the first photo of the first chunk
                 if i == 0 && chunk.iter().position(|x| *x == *p) == Some(0) {
@@ -223,6 +227,7 @@ pub async fn send_media_album(
                 }
                 inp
             })
+            .map(InputMedia::Photo)
             .collect();
         match bot.send_media_group(chat_id, medias).await {
             Ok(msgs) => messages.extend(msgs),
@@ -2569,9 +2574,9 @@ fn utf16_len(s: &str) -> usize {
 }
 
 /// Return the largest prefix of `s` whose UTF-16 length ≤ `limit`.
-fn utf16_prefix(s: &str, limit: usize) -> &str {
+fn utf16_prefix(s: &str, limit: usize) -> String {
     if utf16_len(s) <= limit {
-        return s;
+        return s.to_string();
     }
     let chars: Vec<char> = s.chars().collect();
     let mut len = 0usize;
@@ -2636,7 +2641,7 @@ async fn send_long(bot: &teloxide::Bot, chat_id: ChatId, body: &str) {
     while idx < body.len() {
         let remaining = &body[idx..];
         let chunk = utf16_prefix(remaining, SEND_LONG_CHUNK);
-        let escaped = escape_code_block(chunk);
+        let escaped = escape_code_block(&chunk);
         let header = format!("({}/{})", part, total);
         let _ = bot
             .send_message(chat_id, format!("{header}\n```\n{escaped}\n```"))
@@ -2657,8 +2662,6 @@ async fn send_long(bot: &teloxide::Bot, chat_id: ChatId, body: &str) {
 // DM Topics support (Bot API 9.4+)
 // Bot API 9.4 introduced forum topics in private DMs.
 // =====================================================================
-
-use std::sync::OnceLock;
 
 /// Per-chat thread ID cache for DM topics persistence.
 static THREAD_CACHE: once_cell::sync::Lazy<std::sync::Mutex<std::collections::HashMap<i64, i32>>> =
