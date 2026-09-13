@@ -1909,10 +1909,13 @@ async fn ai_chat_stream(req: ChatRequest, app: AppHandle) -> Result<(), String> 
     let mut stream = res.bytes_stream();
     let mut buffer = String::new();
     let mut carry: Vec<u8> = Vec::new();
+    // M4 token tracking — accumulate input/output from Anthropic SSE events.
+    let mut anthropic_input_tokens: u64 = 0;
+    let mut anthropic_output_tokens: u64 = 0;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| e.to_string())?;
         push_chunk_text(&mut buffer, &mut carry, &chunk);
-        // SSE: РЎРѓР С•Р В±РЎвЂ№РЎвЂљР С‘РЎРЏ РЎР‚Р В°Р В·Р Т‘Р ВµР В»Р ВµР Р…РЎвЂ№ \n\n, Р С”Р В°Р В¶Р Т‘Р С•Р Вµ Р С‘Р СР ВµР ВµРЎвЂљ Р С—Р С•Р В»РЎРЏ Р Р†Р С‘Р Т‘Р В° "data: {...}".
+        // SSE: events separated by blank lines.
         while let Some(idx) = buffer.find("\n\n") {
             let event = buffer[..idx].to_string();
             buffer = buffer[idx + 2..].to_string();
@@ -1923,6 +1926,24 @@ async fn ai_chat_stream(req: ChatRequest, app: AppHandle) -> Result<(), String> 
                         continue;
                     }
                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(rest) {
+                        // message_start carries input_tokens in usage.
+                        if v.get("type").and_then(|t| t.as_str()) == Some("message_start") {
+                            if let Some(usage) = v.get("message")
+                                .and_then(|m| m.get("usage"))
+                            {
+                                if let Some(n) = usage.get("input_tokens").and_then(|x| x.as_u64()) {
+                                    anthropic_input_tokens = n;
+                                }
+                            }
+                        }
+                        // message_delta carries output_tokens in usage (cumulative).
+                        if v.get("type").and_then(|t| t.as_str()) == Some("message_delta") {
+                            if let Some(usage) = v.get("usage") {
+                                if let Some(n) = usage.get("output_tokens").and_then(|x| x.as_u64()) {
+                                    anthropic_output_tokens = n;
+                                }
+                            }
+                        }
                         if let Some(delta) = v.get("delta").and_then(|d| d.get("text")).and_then(|t| t.as_str()) {
                             let _ = app.emit("ai_chunk", delta.to_string());
                         }
@@ -1938,6 +1959,24 @@ async fn ai_chat_stream(req: ChatRequest, app: AppHandle) -> Result<(), String> 
         }
     }
     let _ = app.emit("ai_done", true);
+
+    // M4: log token usage from this chat turn.
+    if anthropic_input_tokens > 0 || anthropic_output_tokens > 0 {
+        let model = &model;
+        let cost = services::agent::cost::estimate_response_usd(
+            model,
+            anthropic_input_tokens,
+            anthropic_output_tokens,
+        );
+        tracing::debug!(
+            input = anthropic_input_tokens,
+            output = anthropic_output_tokens,
+            usd = cost,
+            model = model,
+            "ai_chat_stream: token usage"
+        );
+        // TODO(r5): accumulate into a session-level cost tracker exposed via UI.
+    }
     // ---- M4: fact extraction spawn. Fire-and-forget; never
     // blocks the chat. After each chat turn, we extract atomic facts
     // from the last 6 messages and dispatch them into L1 + L2 + graph.

@@ -1,14 +1,14 @@
 //! Token cost estimation (Phase M0+).
 //!
 //! Pricing per million tokens (USD). **Update these when the provider
-//! changes rates.** The actual `MiniMax` dashboard is the source of
+//! changes rates.** The actual provider dashboard is the source of
 //! truth; these are best-effort defaults used only for the UI's
 //! "estimated cost" display.
 //!
-//! ## Why not query the API?
-//! Some providers return token counts only on the response payload,
-//! not in headers. We prefer to keep cost estimation local + explicit
-//! (and overridable via Settings in a future v1.1).
+//! ## Sources
+//! - MiniMax: https://www.minimaxi.com/pricing (2026-09)
+//! - Anthropic: https://www.anthropic.com/pricing (2026-09)
+//! - OpenAI: https://openai.com/api/pricing (2026-09)
 
 /// Per-million-token USD price.
 #[derive(Debug, Clone, Copy)]
@@ -39,6 +39,41 @@ pub fn pricing_for(model: &str) -> ModelPricing {
             input_per_million: 0.50,
             output_per_million: 1.50,
             cache_read_per_million: 0.10,
+        },
+        // ---- Anthropic Claude models (ai_chat_stream, extraction) ----
+        // claude-3-5-sonnet (2025-06): $3/input, $15/output.
+        m if m.contains("claude-3-5-sonnet") => ModelPricing {
+            input_per_million: 3.00,
+            output_per_million: 15.00,
+            cache_read_per_million: 0.30,
+        },
+        // claude-3-opus: $15/input, $75/output.
+        m if m.contains("claude-3-opus") || m.contains("claude-opus") => ModelPricing {
+            input_per_million: 15.00,
+            output_per_million: 75.00,
+            cache_read_per_million: 1.50,
+        },
+        // claude-3-haiku: $0.80/input, $4/output (used for extraction).
+        m if m.contains("claude-3-haiku") || m.contains("claude-haiku") => ModelPricing {
+            input_per_million: 0.80,
+            output_per_million: 4.00,
+            cache_read_per_million: 0.08,
+        },
+        // ---- OpenAI models (future-proofing) ----
+        m if m.contains("gpt-4o") => ModelPricing {
+            input_per_million: 2.50,
+            output_per_million: 10.00,
+            cache_read_per_million: 1.25,
+        },
+        m if m.contains("gpt-4o-mini") => ModelPricing {
+            input_per_million: 0.15,
+            output_per_million: 0.60,
+            cache_read_per_million: 0.075,
+        },
+        m if m.contains("gpt-4-turbo") || m.contains("gpt-4-32k") => ModelPricing {
+            input_per_million: 10.00,
+            output_per_million: 30.00,
+            cache_read_per_million: 0.00,
         },
         // Unknown — fall back to M3 (the current default model).
         _ => ModelPricing {
@@ -164,6 +199,47 @@ mod tests {
         let m3 = pricing_for("MiniMax-M3");
         assert!(m27.input_per_million < m3.input_per_million);
         assert!(m27.output_per_million < m3.output_per_million);
+    }
+
+    #[test]
+    fn pricing_claude_35_sonnet_known_rates() {
+        let p = pricing_for("claude-3-5-sonnet-20250620");
+        assert!((p.input_per_million - 3.00).abs() < 1e-9);
+        assert!((p.output_per_million - 15.00).abs() < 1e-9);
+        assert!(p.output_per_million > p.input_per_million);
+    }
+
+    #[test]
+    fn pricing_claude_haiku_cheapest_anthropic() {
+        let haiku = pricing_for("claude-3-haiku-20240307");
+        let sonnet = pricing_for("claude-3-5-sonnet-latest");
+        assert!(haiku.input_per_million < sonnet.input_per_million);
+        assert!(haiku.output_per_million < sonnet.output_per_million);
+    }
+
+    #[test]
+    fn pricing_gpt_4o_known_rates() {
+        let p = pricing_for("gpt-4o-2024-08-06");
+        assert!((p.input_per_million - 2.50).abs() < 1e-9);
+        assert!((p.output_per_million - 10.00).abs() < 1e-9);
+        // Cache read should be half of input.
+        assert!(p.cache_read_per_million < p.input_per_million);
+    }
+
+    #[test]
+    fn estimate_response_usd_claude_haiku_extraction() {
+        // Simulate an extraction call: ~500 input, ~200 output tokens.
+        let usd = estimate_response_usd("claude-3-haiku-20240307", 500, 200);
+        // 500/1M * $0.80 + 200/1M * $4.00 = $0.0004 + $0.0008 = $0.0012
+        assert!((usd - 0.0012).abs() < 1e-5);
+    }
+
+    #[test]
+    fn estimate_response_usd_claude_sonnet_chat() {
+        // Simulate a chat call: ~2000 input, ~500 output tokens.
+        let usd = estimate_response_usd("claude-3-5-sonnet-latest", 2000, 500);
+        // 2000/1M * $3.00 + 500/1M * $15.00 = $0.006 + $0.0075 = $0.0135
+        assert!((usd - 0.0135).abs() < 1e-5);
     }
 
     #[test]
