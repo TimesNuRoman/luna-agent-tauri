@@ -394,6 +394,26 @@ export function webSearchCacheStats() {
   }>('web_search_cache_stats');
 }
 
+// ---------- Perplexity-style deep research ----------
+
+export type ResearchEvent =
+  | { type: 'search_done'; iteration: number; results: Array<{ source: string; title: string; url: string; snippet: string; published: string; fetched_at: number }> }
+  | { type: 'url_fetched'; iteration: number; url: string; title: string; snippet: string; chars_kept: number }
+  | { type: 'followup_started'; iteration: number; query: string }
+  | { type: 'step_done'; iteration: number; summary: string; next_queries: string[] }
+  | { type: 'final_report'; report: string; citations: Array<{ index: number; url: string; title: string }>; urls_fetched: number; searches_done: number }
+  | { type: 'error'; message: string };
+
+export function deepResearch(query: string, maxIterations?: number): Promise<void> {
+  return core().invoke('deep_research', { query, maxIterations });
+}
+
+export function onResearchEvent(handler: (event: ResearchEvent) => void): () => void {
+  const listener = (payload: ResearchEvent) => handler(payload);
+  core().listen<ResearchEvent>('research_event', (event) => listener(event.payload));
+  return () => core().unlisten('research_event', () => {});
+}
+
 // ---------- Chat history (persistent) ----------
 
 export type ChatSummary = {

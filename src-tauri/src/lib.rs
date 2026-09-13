@@ -5642,6 +5642,7 @@ async fn call_minimax(
 // copy of the graph.
 
 use services::three_d as td;
+use services::research::ResearchEvent;
 
 #[tauri::command]
 fn three_d_apply_ops(
@@ -6376,6 +6377,86 @@ fn web_search_cache_stats() -> serde_json::Value {
         "ttl_secs": CACHE_TTL_SECS,
         "max_entries": CACHE_MAX_ENTRIES,
     })
+}
+
+// =====================================================================
+// Perplexity-style deep research
+// =====================================================================
+
+#[tauri::command]
+async fn deep_research(
+    app: tauri::AppHandle,
+    query: String,
+    max_iterations: Option<usize>,
+) -> Result<(), String> {
+    use tauri::Emitter;
+
+    let iterations = max_iterations.unwrap_or(3).clamp(1, 5);
+
+    // Web search via the existing web_search function.
+    async fn do_web_search(query: String, limit: usize) -> Vec<crate::NewsItem> {
+        crate::web_search(query, limit as u32)
+            .await
+            .unwrap_or_default()
+    }
+
+    // LLM call via minimax_chat_stream.
+    async fn do_llm(system: String, user: String) -> String {
+        use std::sync::Arc;
+        use parking_lot::Mutex;
+        use crate::MiniMaxConfig;
+
+        let config = MiniMaxConfig::default();
+
+        let system_msg = crate::ChatMessage {
+            role: "system".to_string(),
+            content: system,
+        };
+        let user_msg = crate::ChatMessage {
+            role: "user".to_string(),
+            content: user,
+        };
+
+        let collected = Arc::new(Mutex::new(String::new()));
+        let collected_clone = collected.clone();
+
+        let result = crate::minimax_chat_stream(
+            config,
+            vec![system_msg, user_msg],
+            None,
+            None,
+            Some(Box::new(move |text: String| {
+                *collected_clone.lock() += &text;
+            })),
+        )
+        .await;
+
+        match result {
+            Ok(_) => Arc::try_unwrap(collected).unwrap().into_inner(),
+            Err(e) => {
+                eprintln!("[deep_research] LLM call failed: {}", e);
+                String::new()
+            }
+        }
+    }
+
+    let app_clone = app.clone();
+
+    research::deep_research_stream(
+        query,
+        iterations,
+        |q, lim| Box::pin(do_web_search(q, lim)),
+        |sys, usr| Box::pin(do_llm(sys, usr)),
+        move |event| {
+            let app = app_clone.clone();
+            async move {
+                let _ = app.emit("research_event", &event);
+            }
+        },
+    )
+    .await;
+
+    Ok(())
 }
 
 async fn build_client() -> Result<reqwest::Client, String> {
@@ -9970,6 +10051,7 @@ pub fn run() {
             web_search,
             clear_web_search_cache,
             web_search_cache_stats,
+            deep_research,
             // Chat history
             save_chat,
             list_chats,

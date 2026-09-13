@@ -10,6 +10,9 @@
     webSearchCacheStats,
     clearWebSearchCache,
     openUrl,
+    deepResearch,
+    onResearchEvent,
+    type ResearchEvent,
     onAiChunk,
     onAiThinking,
     onAiToolUse,
@@ -2246,6 +2249,87 @@
   let readMore: { url: string; title: string; text: string; loading: boolean } | null = null;
   let researchDrawer: { loading: boolean; url: string; html: string } | null = null;
 
+  // ---- Perplexity-style Deep Research ----
+  let deepResearchActive = false;
+  let deepResearchQuery = '';
+  let deepResearchLoading = false;
+  let deepResearchError = '';
+  let deepResearchStep = 0;         // current iteration
+  let deepResearchMaxSteps = 3;
+  let deepResearchStatus = '';      // human-readable status
+  let deepResearchCurrentUrl = '';   // URL being fetched right now
+  let deepResearchFetchedUrls: string[] = [];
+  let deepResearchFinalReport = '';  // Markdown report
+  let deepResearchCitations: Array<{ index: number; url: string; title: string }> = [];
+  let deepResearchStats = { urls_fetched: 0, searches_done: 0 };
+
+  function formatDeepStatus(step: number, max: number, status: string) {
+    return `Шаг ${step}/${max}: ${status}`;
+  }
+
+  async function runDeepResearch(query: string) {
+    if (!query.trim()) return;
+    deepResearchQuery = query;
+    deepResearchActive = true;
+    deepResearchLoading = true;
+    deepResearchError = '';
+    deepResearchStep = 0;
+    deepResearchMaxSteps = 3;
+    deepResearchStatus = 'Начинаю исследование…';
+    deepResearchCurrentUrl = '';
+    deepResearchFetchedUrls = [];
+    deepResearchFinalReport = '';
+    deepResearchCitations = [];
+    deepResearchStats = { urls_fetched: 0, searches_done: 0 };
+
+    const unsub = onResearchEvent((event: ResearchEvent) => {
+      switch (event.type) {
+        case 'search_done':
+          deepResearchStep = event.iteration;
+          deepResearchStatus = `Поиск: ${event.results.length} результатов`;
+          break;
+        case 'url_fetched':
+          deepResearchCurrentUrl = event.url;
+          deepResearchFetchedUrls = [...deepResearchFetchedUrls, event.url];
+          break;
+        case 'followup_started':
+          deepResearchStatus = `Следующий шаг: "${event.query}"`;
+          break;
+        case 'step_done':
+          deepResearchStep = event.iteration;
+          deepResearchStatus = event.summary.slice(0, 120);
+          break;
+        case 'final_report':
+          deepResearchLoading = false;
+          deepResearchFinalReport = event.report;
+          deepResearchCitations = event.citations;
+          deepResearchStats = { urls_fetched: event.urls_fetched, searches_done: event.searches_done };
+          deepResearchStatus = `Готово! ${event.searches_done} поисков, ${event.urls_fetched} страниц`;
+          break;
+        case 'error':
+          deepResearchLoading = false;
+          deepResearchError = event.message;
+          deepResearchStatus = 'Ошибка';
+          break;
+      }
+    });
+
+    try {
+      await deepResearch(deepResearchQuery, 3);
+    } catch (e) {
+      deepResearchLoading = false;
+      deepResearchError = String(e);
+    } finally {
+      unsub();
+    }
+  }
+
+  function closeDeepResearch() {
+    deepResearchActive = false;
+    deepResearchLoading = false;
+    deepResearchError = '';
+  }
+
   function fuseId(): number { return Math.floor(Math.random() * 1e9) + 1; }
 
   async function runResearch(query: string) {
@@ -4408,8 +4492,16 @@
           </form>
 
           <button class="refresh-btn sidebar-refresh" on:click={fetchResearch} disabled={researchLoading} title="Обновить ленту">
-            {#if researchLoading}<span class="spinner-mini"></span>РС‰Сѓ…{:else}🔄 Обновить{/if}
+            {#if researchLoading}<span class="spinner-mini"></span>РЁСѓ…{:else}🔄 Обновить{/if}
           </button>
+
+          {#if !deepResearchActive}
+            <button
+              class="sidebar-deep-btn"
+              on:click={() => { deepResearchQuery = ''; deepResearchActive = true; }}
+              title="Perplexity-style deep research"
+            >🔬 Deep Research</button>
+          {/if}
 
           <div class="sidebar-interests">
             {#if userInterests.length === 0}
@@ -4438,6 +4530,71 @@
             </div>
           {/if}
         </aside>
+
+        {#if deepResearchActive}
+          <div class="deep-research-panel">
+            <div class="dr-header">
+              <span class="dr-icon">🔬</span>
+              <span class="dr-title">Deep Research</span>
+              <button class="dr-close" on:click={closeDeepResearch} title="Закрыть">×</button>
+            </div>
+
+            <div class="dr-body">
+              {#if deepResearchLoading}
+                <div class="dr-loading">
+                  <div class="dr-spinner">⏳</div>
+                  <div class="dr-step">
+                    Шаг {deepResearchStep}/{deepResearchMaxSteps} — {deepResearchStatus}
+                  </div>
+                  {#if deepResearchCurrentUrl}
+                    <div class="dr-url">Загружаю: {deepResearchCurrentUrl.slice(0, 60)}…</div>
+                  {/if}
+                </div>
+              {:else if deepResearchError}
+                <div class="dr-error">⚠️ {deepResearchError}</div>
+              {:else if deepResearchFinalReport}
+                <div class="dr-report">
+                  {#if deepResearchStats}
+                    <div class="dr-stats">
+                      {deepResearchStats.searches} поисков · {deepResearchStats.pages} страниц · {deepResearchStats.queries} уточнений
+                    </div>
+                  {/if}
+                  <div class="dr-content">{@html renderMarkdown(deepResearchFinalReport)}</div>
+                  {#if deepResearchCitations && deepResearchCitations.length > 0}
+                    <div class="dr-citations">
+                      <div class="dr-cite-title">Источники:</div>
+                      {#each deepResearchCitations as cite, i}
+                        <div class="dr-cite-item">
+                          <span class="dr-cite-num">[{i + 1}]</span>
+                          <a href={cite.url} target="_blank" rel="noopener noreferrer">{cite.title}</a>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              {:else}
+                <div class="dr-prompt">
+                  <p>Perplexity-style deep research: итеративный поиск, уточняющие вопросы и структурированный отчёт с цитатами.</p>
+                </div>
+              {/if}
+            </div>
+
+            {#if !deepResearchLoading && !deepResearchFinalReport}
+              <form class="dr-form" on:submit|preventDefault={() => runDeepResearch(deepResearchQuery)}>
+                <input
+                  class="dr-input"
+                  type="text"
+                  bind:value={deepResearchQuery}
+                  placeholder="О чём хочешь узнать подробнее?"
+                  disabled={deepResearchLoading}
+                />
+                <button class="dr-submit" type="submit" disabled={!deepResearchQuery.trim() || deepResearchLoading}>
+                  Исследовать →
+                </button>
+              </form>
+            {/if}
+          </div>
+        {/if}
 
         <div class="research-feed">
           <div class="research-head">
@@ -8170,6 +8327,71 @@
     margin-top: 4px;
   }
   :global(html:not(.theme-dark)) .context-foot-note { color: #8a7a68; border-color: rgba(60,50,40,0.10); }
+
+  /* ---- Deep Research Panel ---- */
+  .deep-research-panel {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 16px;
+    margin: 0 0 16px 0;
+  }
+  .dr-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .dr-icon { font-size: 18px; }
+  .dr-title { font-size: 14px; font-weight: 600; color: #e2e8f0; flex: 1; }
+  .dr-close {
+    background: none; border: none; cursor: pointer; font-size: 16px;
+    color: #6c7280; padding: 2px 6px; border-radius: 4px;
+  }
+  .dr-close:hover { background: rgba(255,255,255,0.1); color: #e2e8f0; }
+  .dr-body { min-height: 60px; margin-bottom: 12px; }
+  .dr-loading {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 20px 0; color: #94a3b8;
+  }
+  .dr-spinner { font-size: 28px; animation: pulse 1.5s infinite; }
+  .dr-step { font-size: 13px; color: #cbd5e1; }
+  .dr-url { font-size: 11px; color: #64748b; word-break: break-all; }
+  .dr-error { padding: 10px; background: rgba(239,68,68,0.1); border-radius: 6px; color: #f87171; font-size: 13px; }
+  .dr-prompt { font-size: 13px; color: #64748b; line-height: 1.5; padding: 4px 0; }
+  .dr-stats { font-size: 11px; color: #64748b; margin-bottom: 10px; }
+  .dr-content { font-size: 13px; line-height: 1.6; color: #cbd5e1; }
+  .dr-content :global(h1), .dr-content :global(h2), .dr-content :global(h3) { color: #e2e8f0; margin: 12px 0 6px; }
+  .dr-content :global(p) { margin: 0 0 8px; }
+  .dr-content :global(ul), .dr-content :global(ol) { margin: 0 0 8px; padding-left: 20px; }
+  .dr-content :global(a) { color: #60a5fa; }
+  .dr-content :global(strong) { color: #e2e8f0; }
+  .dr-citations { margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px; }
+  .dr-cite-title { font-size: 11px; font-weight: 600; color: #64748b; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .dr-cite-item { font-size: 12px; color: #94a3b8; margin-bottom: 4px; }
+  .dr-cite-num { color: #60a5fa; margin-right: 4px; }
+  .dr-cite-item a { color: #60a5fa; text-decoration: none; }
+  .dr-cite-item a:hover { text-decoration: underline; }
+  .dr-form { display: flex; gap: 8px; }
+  .dr-input {
+    flex: 1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px; padding: 8px 12px; color: #e2e8f0; font-size: 13px; outline: none;
+  }
+  .dr-input:focus { border-color: rgba(96,165,250,0.5); }
+  .dr-input::placeholder { color: #475569; }
+  .dr-submit {
+    background: #3b82f6; border: none; border-radius: 8px; padding: 8px 14px;
+    color: white; font-size: 13px; cursor: pointer; white-space: nowrap;
+  }
+  .dr-submit:hover { background: #2563eb; }
+  .dr-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+  .sidebar-deep-btn {
+    width: 100%; background: rgba(96,165,250,0.15); border: 1px solid rgba(96,165,250,0.3);
+    border-radius: 8px; padding: 8px; color: #60a5fa; font-size: 13px; cursor: pointer;
+    transition: background 0.2s;
+  }
+  .sidebar-deep-btn:hover { background: rgba(96,165,250,0.25); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
 </style>
 
 <!-- Phase UX-2: credentials modal.
