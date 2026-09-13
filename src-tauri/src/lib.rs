@@ -1938,9 +1938,10 @@ async fn ai_chat_stream(req: ChatRequest, app: AppHandle) -> Result<(), String> 
         }
     }
     let _ = app.emit("ai_done", true);
-    // ---- M2: fact extraction spawn. Fire-and-forget; never
-    // blocks the chat. We re-read the API key (cheap, OS keyring)
-    // and the last few messages from the request we just sent.
+    // ---- M4: fact extraction spawn. Fire-and-forget; never
+    // blocks the chat. After each chat turn, we extract atomic facts
+    // from the last 6 messages and dispatch them into L1 + L2 + graph.
+    // Uses the new ExtractContextProvider pattern (OpenViking-inspired).
     // If anything fails, the chat is unaffected.
     if let Some(state) = app.try_state::<AppState>() {
         let svc_opt = state.memory.lock().clone();
@@ -1963,28 +1964,18 @@ async fn ai_chat_stream(req: ChatRequest, app: AppHandle) -> Result<(), String> 
                 let provider = services::memory::extraction::ExtractionProvider::Anthropic;
                 let app_handle = app.clone();
                 tokio::spawn(async move {
-                    let raw = services::memory::extraction::extract_facts(
-                        &last_msgs,
+                    services::memory::extraction::extract_and_dispatch_session(
+                        &svc,
+                        last_msgs,
                         provider,
                         &api_key,
                     )
                     .await;
-                    if raw.is_empty() {
-                        return;
-                    }
+                    // Nudge the UI so the Memory tab refreshes.
                     let ts = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_millis() as i64)
                         .unwrap_or(0);
-                    let source_event_id = format!("extract-{}", uuid::Uuid::new_v4());
-                    services::memory::extraction::dispatch(
-                        &svc,
-                        raw,
-                        source_event_id,
-                        ts,
-                    )
-                    .await;
-                    // Nudge the UI so the Memory tab refreshes.
                     let _ = app_handle.emit("memory_extracted", ts);
                 });
             }
@@ -7014,8 +7005,9 @@ fn memory_list_recent(
     Ok(svc.list_recent(n, k))
 }
 
-/// Cheap keyword search over L1. M2 adds dense L2 cosine +
-/// Reciprocal Rank Fusion with L1 keyword hits.
+/// Keyword search across L1 + L2 with RRF fusion, hotness boost,
+/// and reranking. After returning hits, bumps access counts for all
+/// returned event ids so hotness scores stay current.
 #[tauri::command]
 fn memory_search(
     query: String,
@@ -7024,21 +7016,25 @@ fn memory_search(
 ) -> Result<Vec<services::memory::RecallHit>, String> {
     let svc = memory_or_err(&state)?;
     let started = std::time::Instant::now();
-    // L1 keyword hits (cheap, always available).
+
+    // Gather all layer data.
     let events = svc.list_recent(2000, None);
+    let now_ms = services::memory::now_ms();
+
     let q = services::memory::retrieval::RecallQuery {
         query: query.clone(),
         top_k: top_k.max(1) * 2,
         include_secret: false,
         budget_ms: 200,
     };
-    let l1_hits = services::memory::retrieval::recall_l1_only(&q, &events);
-    // L2 dense hits (async). Best-effort: if L2 isn't loaded, we
-    // skip and report only L1.
-    let l2_pairs: Vec<(services::memory::MemoryFact, f32)> = match svc.l2.as_ref() {
+
+    // L1 keyword hits.
+    let l1_events = &events;
+    let l1_hits = services::memory::retrieval::search_l1(&q, l1_events);
+
+    // L2 semantic hits (async, best-effort).
+    let l2_hits = match svc.l2.as_ref() {
         Some(_) => {
-            // Build a one-shot runtime for the L2 search (we're in
-            // a sync Tauri command).
             let svc_arc = svc.clone();
             let q2 = query.clone();
             let k = top_k.max(1) * 2;
@@ -7048,44 +7044,51 @@ fn memory_search(
                 .map_err(|e| e.to_string())?;
             rt.block_on(async move { svc_arc.search_l2(&q2, k).await })
                 .unwrap_or_default()
+                .into_iter()
+                .map(|(fact, score)| services::memory::RecallHit {
+                    layer: services::memory::RecallLayer::L2,
+                    id: fact.id.clone(),
+                    text: fact.text.clone(),
+                    score,
+                    source: Some(fact.source_event_id),
+                    ts: fact.ts,
+                })
+                .collect()
         }
         None => Vec::new(),
     };
-    // Reciprocal Rank Fusion (k0=60, the standard RRF constant).
-    let k0 = 60.0_f32;
-    let mut scored: std::collections::HashMap<String, (f32, services::memory::RecallHit)> =
-        std::collections::HashMap::new();
-    for (rank, h) in l1_hits.iter().enumerate() {
-        let s = 1.0 / (k0 + rank as f32 + 1.0);
-        let entry = scored.entry(h.id.clone()).or_insert((0.0, h.clone()));
-        entry.0 += s;
-    }
-    for (rank, (fact, score)) in l2_pairs.iter().enumerate() {
-        let s = 1.0 / (k0 + rank as f32 + 1.0);
-        let hit = services::memory::RecallHit {
-            layer: services::memory::RecallLayer::L2,
-            id: fact.id.clone(),
-            text: fact.text.clone(),
-            score: *score,
-            source: Some(fact.source_event_id.clone()),
-            ts: fact.ts,
-        };
-        let entry = scored.entry(hit.id.clone()).or_insert((0.0, hit));
-        entry.0 += s;
-    }
-    let mut out: Vec<services::memory::RecallHit> = scored
-        .into_iter()
-        .map(|(_, (s, mut h))| {
-            // Normalize to [0,1] by clamping to 2/k0 (two equal
-            // top-rank hits). 0..1 range.
-            h.score = (s * k0 / 2.0).min(1.0);
-            h
-        })
+
+    // Graph hits (placeholder — M5 adds real graph beam search).
+    let graph_hits: Vec<services::memory::RecallHit> = Vec::new();
+
+    // Build importance map from L2 facts.
+    let importance_map = l2_hits
+        .iter()
+        .map(|h| (h.id.clone(), h.score))
         .collect();
-    out.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-    out.truncate(top_k.max(1));
-    let _ = started; // reserved for stats
-    Ok(out)
+
+    // Assemble via RRF + hotness + rerank.
+    let bundle = services::memory::retrieval::assemble_bundle(
+        q,
+        l1_events,
+        l2_hits,
+        graph_hits,
+        &importance_map,
+        &svc.access_tracker(),
+        now_ms,
+    );
+
+    // Bump access counts for every hit returned.
+    for h in &bundle.hits {
+        svc.bump_access(&h.id);
+    }
+
+    tracing::debug!(
+        hits = bundle.hits.len(),
+        elapsed_ms = started.elapsed().as_millis(),
+        "memory: search complete"
+    );
+    Ok(bundle.hits)
 }
 
 /// Full-pipeline recall (L0+L1+L2+graph). M0/M1 falls back to L1-only
