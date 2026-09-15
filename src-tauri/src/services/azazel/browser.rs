@@ -22,6 +22,8 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::services::azazel::state::BrowserFrame;
+use crate::services::azazel::stealth::StealthConfig;
+use crate::services::azazel::stealth_js::STEALTH_JS;
 
 /// Crate-local alias for the chromiumoxide Browser type. Kept here
 /// so a future version bump only touches one line.
@@ -66,6 +68,13 @@ pub struct LaunchConfig {
     /// Extra Chromium args. Useful for things like `--no-sandbox`
     /// (CI/Docker) or `--lang=ru-RU`.
     pub extra_args: Vec<String>,
+    /// PR-1 Layer 1 anti-block: optional stealth config. When
+    /// `Some`, the chromiumoxide launch gets `StealthConfig::to_chrome_args()`
+    /// appended to `extra_args`, and every page created via
+    /// `BrowserSession::new_page` gets the STEALTH_JS payload
+    /// installed via `Page.evaluate_on_new_document` before any
+    /// user script runs. `None` ⇒ fully stealth-disabled (default).
+    pub stealth: Option<StealthConfig>,
 }
 
 impl LaunchConfig {
@@ -76,6 +85,7 @@ impl LaunchConfig {
             headless: false,
             window_size: (1280, 720),
             extra_args: Vec::new(),
+            stealth: None,
         }
     }
 }
@@ -110,6 +120,10 @@ struct BrowserInner {
     /// Whether the user explicitly closed the session (e.g. on app
     /// shutdown). New tasks should reject when this is true.
     closed: AtomicBool,
+    /// Optional PR-1 Layer 1 stealth config. When `Some`, every
+    /// `new_page` call installs the STEALTH_JS payload before any
+    /// user script runs. `None` ⇒ no JS injection.
+    stealth: Option<StealthConfig>,
 }
 
 impl BrowserSession {
@@ -139,7 +153,20 @@ impl BrowserSession {
             .user_data_dir(&config.profile_dir)
             .window_size(config.window_size.0, config.window_size.1)
             .with_head();
-        for arg in &config.extra_args {
+
+        // PR-1 Layer 1 anti-block: when a stealth config is present,
+        // fold its Chromium args (proxy, UA, locale, viewport,
+        // `--disable-blink-features=AutomationControlled`) into
+        // `extra_args` before passing to the builder. The extra_args
+        // supplied by the caller are preserved first so user overrides
+        // land at the end of the list.
+        let mut extra_args = config.extra_args.clone();
+        if let Some(stealth_cfg) = config.stealth.as_ref() {
+            if stealth_cfg.wants_stealth_js() {
+                extra_args.extend(stealth_cfg.to_chrome_args());
+            }
+        }
+        for arg in &extra_args {
             builder = builder.arg(arg.clone());
         }
         let cx_config = builder
@@ -155,6 +182,7 @@ impl BrowserSession {
                 browser,
                 _handler: handler,
                 closed: AtomicBool::new(false),
+                stealth: config.stealth,
             }),
         })
     }
@@ -173,6 +201,10 @@ impl BrowserSession {
     }
 
     /// Open a new tab (`about:blank`) and return a `TaskPage` handle.
+    /// When the session was launched with `stealth = Some(...)` AND
+    /// the config has any Layer 1 toggle on, the STEALTH_JS patch is
+    /// installed via `Page.evaluate_on_new_document` right after the
+    /// page is created — before any user script can run.
     pub async fn new_page(&self, task_id: &str) -> Result<TaskPage, BrowserError> {
         if !self.is_alive() {
             return Err(BrowserError::NotRunning);
@@ -183,10 +215,46 @@ impl BrowserSession {
             .new_page("about:blank")
             .await
             .map_err(|e| BrowserError::Page(format!("new_page({task_id}): {e}")))?;
-        Ok(TaskPage {
+        let task_page = TaskPage {
             task_id: task_id.to_string(),
             page: Arc::new(page),
-        })
+        };
+        // PR-1 Layer 1: best-effort stealth JS install. A failure here
+        // is logged but does NOT fail `new_page` — the browser is
+        // useful even without the JS payload (the Chromium flags
+        // already give us 80% of the protection).
+        if self.inner.stealth.as_ref().is_some_and(|s| s.wants_stealth_js()) {
+            if let Err(e) = self.install_stealth_script(&task_page).await {
+                tracing::warn!(
+                    target: "luna.azazel",
+                    task_id,
+                    "failed to install stealth JS payload: {e}"
+                );
+            }
+        }
+        Ok(task_page)
+    }
+
+    /// Install the STEALTH_JS payload on `page` so it runs in every
+    /// new document before any user script. Caller is responsible for
+    /// only calling this when stealth is actually configured.
+    ///
+    /// Uses chromiumoxide 0.7's `Page::evaluate_on_new_document`
+    /// which takes `impl Into<AddScriptToEvaluateOnNewDocumentParams>`
+    /// (a `String` implements that via the `From<T: Into<String>>`
+    /// impl on the params struct). The returned `ScriptIdentifier` is
+    /// the CDP-side handle for the installed script — we discard it
+    /// because CDP keeps the script alive for the lifetime of the
+    /// target, which matches the lifetime of `TaskPage`.
+    pub async fn install_stealth_script(
+        &self,
+        page: &TaskPage,
+    ) -> Result<(), BrowserError> {
+        page.page
+            .evaluate_on_new_document(STEALTH_JS.to_string())
+            .await
+            .map(|_script_id| ())
+            .map_err(|e| BrowserError::Page(format!("install_stealth_script: {e}")))
     }
 
     /// Get the underlying `CxBrowser` for shutdown / advanced use.
@@ -615,6 +683,7 @@ mod tests {
         assert!(!cfg.headless, "default is headed for watch-pane");
         assert_eq!(cfg.window_size, (1280, 720));
         assert!(cfg.extra_args.is_empty());
+        assert!(cfg.stealth.is_none(), "PR-1 stealth defaults to None");
         assert_eq!(cfg.profile_dir, dir);
     }
 

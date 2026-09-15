@@ -21,6 +21,8 @@ pub mod browser;
 pub mod prompts;
 pub mod safety;
 pub mod state;
+pub mod stealth;
+pub mod stealth_js;
 pub mod supervisor;
 pub mod tools;
 
