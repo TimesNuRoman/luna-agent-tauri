@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Directory under `<app_local_data>/azazel/` that holds the
 /// persistent Chromium profile (cookies, logins, history).
@@ -36,11 +36,19 @@ pub struct FrameCache {
 /// Lightweight screenshot frame produced by the browser supervisor.
 /// Mirrors `services::vision::SingleFrame` shape so the UI can render
 /// it without a separate type.
+///
+/// PERF #6: the screenshot payload is shared via `Arc<Vec<u8>>` so
+/// cloning a `BrowserFrame` (e.g. `FrameCache::get` returning
+/// `Option<BrowserFrame>`) bumps an `Arc` refcount instead of
+/// copying 50–200 KB of JPEG bytes on every UI poll and every
+/// supervisor step. The Tauri IPC wire format is unchanged because
+/// `serde` serializes `Arc<Vec<u8>>` transparently as a JSON array.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrowserFrame {
     /// JPEG bytes (or PNG — format chosen by chromiumoxide at capture
-    /// time, but the supervisor always asks for JPEG).
-    pub bytes: Vec<u8>,
+    /// time, but the supervisor always asks for JPEG). Wrapped in
+    /// `Arc` so cache reads and clones are O(1) refcount bumps.
+    pub bytes: Arc<Vec<u8>>,
     pub width: u32,
     pub height: u32,
     /// Monotonic frame counter across the whole app session.
@@ -63,9 +71,26 @@ impl FrameCache {
         seq
     }
 
-    /// Read the latest frame for `task_id` (if any).
+    /// Read the latest frame for `task_id` (if any). Returns a
+    /// cheap clone of the cached `BrowserFrame` — the inner
+    /// `Arc<Vec<u8>>` bytes share storage with the cache (O(1)
+    /// refcount bump instead of copying 50–200 KB of JPEG bytes).
     pub fn get(&self, task_id: &str) -> Option<BrowserFrame> {
         self.inner.lock().ok().and_then(|g| g.get(task_id).cloned())
+    }
+
+    /// Hot-path variant of [`FrameCache::get`] that returns an
+    /// `Arc<BrowserFrame>` instead of cloning the whole struct.
+    /// Even cheaper than [`FrameCache::get`] for callers that only
+    /// need to *look* at the frame and not move/own it (e.g. emit
+    /// it on a Tauri event).
+    ///
+    /// PERF #6: this is the canonical fast path for the Azazel
+    /// supervisor's per-step UI emission. Returns `None` if the
+    /// mutex is poisoned or the task has no cached frame.
+    pub fn get_arc(&self, task_id: &str) -> Option<Arc<BrowserFrame>> {
+        let g = self.inner.lock().ok()?;
+        g.get(task_id).cloned().map(Arc::new)
     }
 
     /// Drop the frame for a finished/cancelled task.
@@ -221,7 +246,7 @@ mod tests {
     fn frame_cache_put_and_get() {
         let cache = FrameCache::default();
         let frame = BrowserFrame {
-            bytes: vec![1, 2, 3],
+            bytes: Arc::new(vec![1, 2, 3]),
             width: 1280,
             height: 720,
             seq: 7,
@@ -232,7 +257,17 @@ mod tests {
         cache.put("task-a", frame.clone());
         let back = cache.get("task-a").expect("frame should be present");
         assert_eq!(back.seq, 7);
-        assert_eq!(back.bytes, vec![1, 2, 3]);
+        assert_eq!(back.bytes.as_ref(), &vec![1, 2, 3]);
+        // PERF #6: get_arc returns the same Arc-wrapped bytes; the
+        // cache slot and the returned frame share one allocation.
+        let back_arc = cache
+            .get_arc("task-a")
+            .expect("frame should be present via get_arc");
+        assert_eq!(back_arc.seq, 7);
+        assert_eq!(back_arc.bytes.as_ref(), &vec![1, 2, 3]);
+        // Arc<BrowserFrame>::ptr_eq is false (different Arc wrappers),
+        // but the inner Arc<Vec<u8>> IS shared — that's the whole point.
+        assert!(Arc::ptr_eq(&back.bytes, &back_arc.bytes));
         // Different task = different slot.
         assert!(cache.get("task-b").is_none());
         // Drop clears.

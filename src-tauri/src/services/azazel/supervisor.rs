@@ -200,6 +200,14 @@ pub async fn run_browser_loop(
     let mut first_user = push_user_with_screenshot(page, state, app, &task.prompt).await;
     messages.push(first_user);
 
+    // PERF #4: hoist `browser_tools()` out of the supervisor loop.
+    // The factory is pure (no state, no I/O) but allocates a
+    // `Vec<MinimaxTool>` every call — 11 tool definitions, each
+    // carrying a JSON-schema `serde_json::Value` plus two `String`s.
+    // We build it once and `.clone()` the cheap `Vec` per iteration
+    // (String clone is small; the tool bodies don't move).
+    let tools = browser_tools();
+
     loop {
         // Cooperative cancel.
         if cancel.is_cancelled() {
@@ -227,7 +235,7 @@ pub async fn run_browser_loop(
         let req = MinimaxRequest {
             model: task.model.clone(),
             messages: messages.clone(),
-            tools: browser_tools(),
+            tools: tools.clone(),
             max_tokens: 2048,
             temperature: Some(0.2),
         };
@@ -338,7 +346,12 @@ pub async fn run_browser_loop(
             // (if any). Tools that don't update the frame simply
             // re-emit the previous one — the UI is responsible for
             // caching, not us.
-            let frame = state.frames.get(&page.task_id);
+            //
+            // PERF #6: use `get_arc()` so we bump one refcount
+            // instead of cloning the 50–200 KB JPEG bytes. The
+            // resulting `Arc<BrowserFrame>` is dropped at the end of
+            // this scope.
+            let frame = state.frames.get_arc(&page.task_id);
             let _ = app.emit(
                 "azazel:step",
                 serde_json::json!({
@@ -735,7 +748,10 @@ async fn gate_approval(
     }
     // Build a preview screenshot (best-effort — if it fails we
     // just emit a placeholder).
-    let (preview_b64, preview_url) = match state.frames.get(&task.id) {
+    //
+    // PERF #6: prefer `get_arc()` so the approval modal's preview
+    // doesn't trigger a 50–200 KB JPEG copy on every tool call.
+    let (preview_b64, preview_url) = match state.frames.get_arc(&task.id) {
         Some(f) => (to_data_url(&f.bytes), f.url.clone()),
         None => (String::new(), String::new()),
     };
@@ -825,9 +841,13 @@ async fn capture_and_cache(
     // via the `naturalWidth` of the <img> once it loads.
     let (width, height) = (1280u32, 720u32);
     let seq = state.next_frame_seq();
+    // PERF #6: wrap the captured JPEG in `Arc` immediately so the
+    // bytes allocation is shared with the cache slot, the cached
+    // frame, and any concurrent UI reads — zero JPEG copies.
+    let jpeg_arc: std::sync::Arc<Vec<u8>> = std::sync::Arc::new(bytes);
     let frame = crate::services::azazel::browser::frame_from_screenshot(
         &page.task_id,
-        bytes,
+        jpeg_arc,
         width,
         height,
         url,

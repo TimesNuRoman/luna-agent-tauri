@@ -615,9 +615,15 @@ pub fn to_data_url(jpeg_bytes: &[u8]) -> String {
 /// Helper: build a `BrowserFrame` from a freshly-captured screenshot
 /// + URL + title. The `seq` is taken from `BrowserState.next_frame_seq`
 /// upstream.
+///
+/// PERF #6: `jpeg` is wrapped in `Arc` here so the underlying bytes
+/// allocation is shared with the caller's captured buffer (avoiding
+/// one full JPEG copy per supervisor step). The supervisor holds the
+/// original `Vec<u8>` returned by chromiumoxide inside an `Arc` and
+/// passes it in directly.
 pub fn frame_from_screenshot(
     task_id: &str,
-    jpeg: Vec<u8>,
+    jpeg: std::sync::Arc<Vec<u8>>,
     width: u32,
     height: u32,
     url: String,
@@ -704,7 +710,7 @@ mod tests {
     fn frame_from_screenshot_stamps_clock() {
         let f = frame_from_screenshot(
             "t1",
-            vec![1, 2, 3],
+            std::sync::Arc::new(vec![1, 2, 3]),
             1280,
             720,
             "https://example.com".into(),
