@@ -5450,77 +5450,13 @@ async fn call_minimax(
 // 3D editor (Luna 3D tab) — Tauri commands
 // =====================================================================
 //
-// These commands back the Svelte store on the frontend. The store owns
-// the live scene graph; the backend is the *gatekeeper* that validates
-// every op before it lands in the audit log and exposes the scene-file
-// IO helpers.
-//
-// `three_d_apply_ops`         — validate a batch of ops + write audit log.
-// `three_d_save_scene_sync`   — atomic JSON write to a workspace-relative path.
-// `three_d_load_scene`        — read + version-check a `.luna3d.json`.
-// `three_d_generate_texture`  — wraps `generate_image_minimax` (image-01).
-//
-// Wire shapes mirror services::three_d::* exactly. The frontend always
-// passes a fresh scene snapshot to `three_d_apply_ops` so the backend
-// can detect duplicate ids and parent-missing without keeping its own
-// copy of the graph.
+// `three_d_apply_ops` / `three_d_save_scene_sync` / `three_d_load_scene` /
+// `three_d_generate_texture` have been extracted to `commands/three_d.rs`
+// (Sprint 4 §4.1). They are re-exported here so `generate_handler![]`
+// below still references them by their original names.
 
-use services::three_d as td;
-
-#[tauri::command]
-fn three_d_apply_ops(
-    ops: Vec<td::SceneOp>,
-    scene: Option<Vec<td::SceneNode>>,
-    actor: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<td::ApplyOpsResult, String> {
-    let workspace = td::resolve_workspace(&state).map_err(|e| e.to_string())?;
-    Ok(td::apply_ops(&workspace, actor.as_deref().unwrap_or("user"), ops, scene))
-}
-
-#[tauri::command]
-fn three_d_save_scene_sync(
-    path: String,
-    scene_json: serde_json::Value,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
-    let workspace = td::resolve_workspace(&state).map_err(|e| e.to_string())?;
-    let scene: td::SceneFile = serde_json::from_value(scene_json)
-        .map_err(|e| format!("scene parse: {e}"))?;
-    if scene.format != td::SCENE_FORMAT {
-        return Err(format!("unknown format: {}", scene.format));
-    }
-    if scene.version > td::SCENE_VERSION_MAX {
-        return Err(format!("unsupported version: {}", scene.version));
-    }
-    let abs = td::save_scene(&workspace, &path, &scene).map_err(|e| e.to_string())?;
-    Ok(abs.to_string_lossy().into_owned())
-}
-
-#[tauri::command]
-fn three_d_load_scene(
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
-    let workspace = td::resolve_workspace(&state).map_err(|e| e.to_string())?;
-    let scene = td::load_scene(&workspace, &path).map_err(|e| e.to_string())?;
-    serde_json::to_value(scene).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn three_d_generate_texture(
-    prompt: String,
-    aspect_ratio: Option<String>,
-) -> Result<String, String> {
-    let imgs = generate_image_minimax(prompt, Some(1), aspect_ratio).await?;
-    let first = imgs.into_iter().next().unwrap_or_default();
-    if first.is_empty() {
-        return Err("MiniMax image-01 returned no image".into());
-    }
-    Ok(format!("data:image/png;base64,{}", first))
-}
 // =====================================================================
-// Р РЋР С•Р В±РЎРѓРЎвЂљР Р†Р ВµР Р…Р Р…РЎвЂ№Р Вµ Р С—Р С•Р С‘РЎРѓР С”Р С•Р Р†РЎвЂ№Р Вµ Р С‘Р Р…РЎРѓРЎвЂљРЎР‚РЎС“Р СР ВµР Р…РЎвЂљРЎвЂ№ (Р В±Р ВµР В· DuckDuckGo)
+// РЎР‚РµСЃСѓСЂСЃРЅС‹Рµ РїРѕРёСЃРєРѕРІС‹Рµ РёРЅСЃС‚СЂСѓРјРµРЅС‚С‹ (Р±РµР· DuckDuckGo)
 //   search_workspace: full-text/regex Р С—Р С• РЎвЂћР В°Р в„–Р В»Р В°Р С РЎвЂљР ВµР С”РЎС“РЎвЂ°Р ВµР С–Р С• workspace
 //   fetch_url:        РЎРѓР С”Р В°РЎвЂЎР В°РЎвЂљРЎРЉ Р С‘ РЎР‚Р В°РЎРѓР С—Р В°РЎР‚РЎРѓР С‘РЎвЂљРЎРЉ HTML-РЎРѓРЎвЂљРЎР‚Р В°Р Р…Р С‘РЎвЂ РЎС“
 // =====================================================================
