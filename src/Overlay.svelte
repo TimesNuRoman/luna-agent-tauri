@@ -116,7 +116,7 @@
     padding: 8px 14px;
     border-radius: 999px;
     background: rgba(20, 20, 20, 0.78);
-    color: #fff;
+    color: var(--text-inverse);
     border: 1px solid rgba(255, 255, 255, 0.12);
     font-family: system-ui, sans-serif;
     font-size: 12px;
@@ -130,7 +130,7 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #aaa;
+    background: var(--text-muted);
     transition: transform 80ms linear;
   }
   .overlay-idle      .dot { background: #888; }
@@ -140,13 +140,5 @@
   .overlay-error     .dot { background: #f33; }
   .msg { line-height: 1; }
 
-
-  /* ---- Overlay light theme ---- */
-  :global(html:not(.theme-dark)) .overlay-backdrop { background: rgba(240,236,230,0.85); backdrop-filter: blur(4px); }
-  :global(html:not(.theme-dark)) .overlay-panel { background: rgba(248,244,238,0.98); border-color: rgba(176,160,140,0.3); box-shadow: 0 8px 32px rgba(0,0,0,0.08); }
-  :global(html:not(.theme-dark)) .overlay-title { color: #1a1c20; }
-  :global(html:not(.theme-dark)) .overlay-close { color: #5a6068; }
-  :global(html:not(.theme-dark)) .overlay-close:hover { color: #1a1c20; background: rgba(176,120,120,0.08); }
-  :global(html:not(.theme-dark)) .overlay-body { color: #5a6068; }
 
 </style>

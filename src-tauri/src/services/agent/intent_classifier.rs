@@ -18,6 +18,8 @@
 //! 2. **Semantic classification** - LLM-based classification for complex requests
 //! 3. **Fallback routing** - Default behavior when classification is uncertain
 
+use once_cell::unsync::OnceCell;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -204,14 +206,40 @@ impl IntentCategory {
 pub struct IntentPattern {
     /// Keywords that trigger this intent
     pub keywords: Vec<String>,
-    /// Regular expression patterns
+    /// Regular expression source strings. Kept for serialization /
+    /// inspection; the compiled form lives in `compiled_regexes`.
     pub regexes: Vec<String>,
+    /// Lazily-compiled regex cache (parallel to `regexes`). One
+    /// `OnceCell` per source string so patterns with identical regex
+    /// strings don't share state. Populated by `compile_regexes()`.
+    #[serde(skip)]
+    pub compiled_regexes: Vec<OnceCell<Regex>>,
     /// The intent category
     pub intent: IntentCategory,
     /// Minimum confidence when pattern matches
     pub base_confidence: Confidence,
     /// Parameters to extract with this pattern
     pub parameter_extractors: Vec<ParameterExtractor>,
+}
+
+impl IntentPattern {
+    /// Build the per-pattern `compiled_regexes` cache from `self.regexes`.
+    /// Invalid regex strings become `OnceCell::new()` (never written),
+    /// so `match_pattern` will silently skip them — same behaviour as
+    /// the old `Regex::new().ok()` fallback.
+    fn compile_regexes(&mut self) {
+        if self.compiled_regexes.len() != self.regexes.len() {
+            self.compiled_regexes = self.regexes.iter().map(|_| OnceCell::new()).collect();
+        }
+        for (src, slot) in self.regexes.iter().zip(self.compiled_regexes.iter()) {
+            if slot.get().is_none() {
+                if let Ok(re) = Regex::new(src) {
+                    // get_or_init requires &self, so we set via a small dance.
+                    let _ = slot.set(re);
+                }
+            }
+        }
+    }
 }
 
 /// Extractor for pulling parameters from messages
@@ -293,6 +321,7 @@ impl IntentClassifier {
                     extractor_type: ExtractorType::FilePath,
                 },
             ],
+            compiled_regexes: Vec::new(),
         });
 
         // Search patterns
@@ -321,6 +350,7 @@ impl IntentClassifier {
                     extractor_type: ExtractorType::SearchQuery,
                 },
             ],
+            compiled_regexes: Vec::new(),
         });
 
         // Execute patterns
@@ -349,6 +379,7 @@ impl IntentClassifier {
                     extractor_type: ExtractorType::Command,
                 },
             ],
+            compiled_regexes: Vec::new(),
         });
 
         // Write patterns
@@ -379,6 +410,7 @@ impl IntentClassifier {
                     extractor_type: ExtractorType::FilePath,
                 },
             ],
+            compiled_regexes: Vec::new(),
         });
 
         // Analyze patterns
@@ -400,6 +432,7 @@ impl IntentClassifier {
             intent: IntentCategory::Analyze,
             base_confidence: Confidence::Medium,
             parameter_extractors: vec![],
+            compiled_regexes: Vec::new(),
         });
 
         // Vision patterns
@@ -419,6 +452,7 @@ impl IntentClassifier {
             intent: IntentCategory::Vision,
             base_confidence: Confidence::Medium,
             parameter_extractors: vec![],
+            compiled_regexes: Vec::new(),
         });
 
         // Git patterns
@@ -439,6 +473,7 @@ impl IntentClassifier {
             intent: IntentCategory::Git,
             base_confidence: Confidence::Medium,
             parameter_extractors: vec![],
+            compiled_regexes: Vec::new(),
         });
 
         // Browser patterns

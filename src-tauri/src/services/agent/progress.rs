@@ -6,8 +6,13 @@
 //! 2. **Live** — selected `TaskStep`s are also emitted as a Tauri event
 //!    so the UI can show a live progress pill. The live channel is
 //!    rate-limited so a chatty supervisor doesn't flood the WebView.
+//!
+//! ## Crash recovery (Phase M3+)
+//! After every tool result, `ProgressEmitter::checkpoint_after_step` writes
+//! a `checkpoint.json` snapshot (status, steps_completed, cost, last_active_at)
+//! so the runner can resume from the last successful step on restart.
 
-use super::task::TaskStep;
+use super::task::{Task, TaskStep};
 use super::task_store::TaskStore;
 use std::time::{Duration, Instant};
 
@@ -125,6 +130,26 @@ impl ProgressEmitter {
     /// coming) so the UI sees the final text.
     pub fn flush(&mut self) {
         self.flush_pending_text();
+    }
+
+    /// Write a crash-recovery checkpoint to `<task_dir>/checkpoint.json`.
+    /// Call this after every tool result so the runner can resume from
+    /// the last saved step on restart. Uses the `steps_completed` value
+    /// from `task` (maintained by the supervisor loop) and the current
+    /// cost snapshot.
+    ///
+    /// Errors are logged but do not propagate — checkpoint failures
+    /// must never interrupt the supervisor loop.
+    pub fn checkpoint_after_step(&mut self, task: &Task) {
+        if let Err(e) = self.store.save_checkpoint(task) {
+            tracing::warn!(
+                target: "agent::progress",
+                task = %self.task_id,
+                error = %e,
+                "failed to write checkpoint after step {}",
+                task.steps_completed
+            );
+        }
     }
 
     /// How many `Coalesce` events have been buffered since the last

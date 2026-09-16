@@ -186,15 +186,15 @@
     border-bottom: 1px solid var(--border);
   }
   .empty { padding: 16px 12px; color: var(--text-muted); font-size: 12px; }
-  .empty p { margin: 4px 0 0 0; font-size: 11px; color: #6c7280; }
+  .empty p { margin: 4px 0 0 0; font-size: 11px; color: var(--text-muted); }
   .body { padding: 8px 12px; overflow-y: auto; flex: 1; }
   .row { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12px; }
   .lbl { color: var(--text-muted); width: 70px; }
-  .hex { color: #6c7280; font-family: ui-monospace, monospace; font-size: 11px; }
-  .num { color: #6c7280; font-family: ui-monospace, monospace; font-size: 11px; width: 28px; text-align: right; }
-  input[type=text] { flex: 1; background: #0f1217; color: #e6e8eb; border: 1px solid #2c313a; border-radius: 4px; padding: 4px 6px; font: inherit; }
-  input[type=number] { width: 60px; background: #0f1217; color: #e6e8eb; border: 1px solid #2c313a; border-radius: 4px; padding: 4px 6px; font: inherit; }
-  input[type=color] { width: 30px; height: 22px; padding: 0; border: 1px solid #2c313a; background: transparent; }
+  .hex { color: var(--text-muted); font-family: ui-monospace, monospace; font-size: 11px; }
+  .num { color: var(--text-muted); font-family: ui-monospace, monospace; font-size: 11px; width: 28px; text-align: right; }
+  input[type=text] { flex: 1; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font: inherit; }
+  input[type=number] { width: 60px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font: inherit; }
+  input[type=color] { width: 30px; height: 22px; padding: 0; border: 1px solid var(--border); background: transparent; }
   input[type=range] { flex: 1; }
   .group {
     border: 1px solid var(--border);
@@ -212,16 +212,8 @@
   .gen-row { display: flex; gap: 4px; margin-top: 4px; }
   .gen-row input { flex: 1; }
   .gen-row button { white-space: nowrap; padding: 4px 8px; }
-  .hint { color: #6c7280; font-size: 10px; margin-top: 4px; }
-  button.primary { background: #4a78c8; color: white; border: 1px solid #4a78c8; border-radius: 4px; cursor: pointer; }
+  .hint { color: var(--text-muted); font-size: 10px; margin-top: 4px; }
+  button.primary { background: var(--info); color: var(--text-inverse); border: 1px solid var(--info); border-radius: 4px; cursor: pointer; }
   button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
-
-
-  /* ---- ThreeDInspector light theme ---- */
-  :global(html:not(.theme-dark)) .tdi-panel { background: rgba(242,238,232,0.95); border-left-color: rgba(176,160,140,0.2); }
-  :global(html:not(.theme-dark)) .tdi-title { color: #1a1c20; border-bottom-color: rgba(176,160,140,0.2); }
-  :global(html:not(.theme-dark)) .tdi-prop-label { color: #5a6068; }
-  :global(html:not(.theme-dark)) .tdi-prop-value { color: #1a1c20; background: rgba(255,255,255,0.6); border-color: rgba(176,160,140,0.2); }
-  :global(html:not(.theme-dark)) .tdi-section-title { color: #8a8f97; border-bottom-color: rgba(176,160,140,0.15); }
 
 </style>

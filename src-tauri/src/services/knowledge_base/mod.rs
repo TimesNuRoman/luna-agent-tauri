@@ -9,11 +9,17 @@ pub mod core_memory;
 pub mod episodic_memory;
 pub mod narrative_memory;
 pub mod knowledge_base;
+pub mod sync;
 
 pub use core_memory::{CoreMemory, CoreMemoryEntry, MemoryPriority};
 pub use episodic_memory::{EpisodicMemory, Episode, EpisodeType, EmotionalTone, Message};
 pub use narrative_memory::{NarrativeMemory, NarrativeEntry, NarrativeType, NarrativeImportance};
 pub use knowledge_base::KnowledgeBase;
+pub use sync::{
+    MemoriFact, MemoriSignal, MemoriSource, SyncConfig, SyncDirection, SyncResult,
+    SyncState, SyncStatus, ConflictStrategy, KnowledgeBaseSync, MemoriToLunaMapper,
+    LunaToMemoriMapper,
+};
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

@@ -118,12 +118,4 @@
   button.on { color: var(--text); background: var(--accent-soft); border-color: var(--accent); }
 
 
-  /* ---- ThreeDToolbar light theme ---- */
-  :global(html:not(.theme-dark)) .tdt-toolbar { background: rgba(242,238,232,0.95); border-top-color: rgba(176,160,140,0.2); }
-  :global(html:not(.theme-dark)) .tdt-btn { color: #5a6068; background: transparent; }
-  :global(html:not(.theme-dark)) .tdt-btn:hover { background: rgba(176,120,120,0.08); color: #8a4848; }
-  :global(html:not(.theme-dark)) .tdt-btn.active { background: rgba(176,120,120,0.85); color: #fff; }
-  :global(html:not(.theme-dark)) .tdt-divider { background: rgba(176,160,140,0.25); }
-  :global(html:not(.theme-dark)) .tdt-label { color: #8a8f97; }
-
 </style>

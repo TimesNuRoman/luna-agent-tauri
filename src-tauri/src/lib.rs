@@ -3,10 +3,6 @@
 // `luna_tools_schema` (serde_json::json! macro hygiene). Headroom for
 // ~10 more tool entries before the next bump.
 use std::path::{Path, PathBuf};
-use tauri::menu::{Menu, MenuItem};
-use tauri::image::Image;
-
-
 use std::process::Stdio;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -14,10 +10,16 @@ use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "gui")]
 use tauri::{
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    menu::{Menu, MenuItem},
+    image::Image,
     AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
+#[cfg(feature = "gui")]
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+#[cfg(feature = "gui")]
 use tauri_plugin_global_shortcut::{
     Code as GsCode, Error as GsError, GlobalShortcutExt, Modifiers as GsModifiers, Shortcut,
     ShortcutState,
@@ -26,96 +28,38 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
 
+#[cfg(feature = "gui")]
 use services::vision::{self, CaptureOptions, CaptureState, MonitorInfo, SingleFrame, VisionRequest};
+#[cfg(not(feature = "gui"))]
+use luna_core::services::vision::{self, CaptureOptions, CaptureState, MonitorInfo, SingleFrame, VisionRequest};
+
+#[cfg(feature = "gui")]
 use services::telegram::{self as tg, TelegramState};
+#[cfg(not(feature = "gui"))]
+use luna_core::services::telegram::{self as tg, TelegramState};
 // Note: services::daimonion commands are referenced inline below
 // as `daimonion::daimonion_chat` etc., so the `use ... as dm;` alias
 // from earlier in the file is no longer needed.
 
-mod services;
+pub mod services;
+#[cfg(feature = "gui")]
 mod secrets;
 
+// =====================================================================
+// Re-exports from luna-core (available with or without gui feature)
+// =====================================================================
+// Re-export core types so both GUI and headless code can use them.
+pub use luna_core::{LunaError, LunaErrorSerde, CoreState};
+pub use luna_core::types::*;
+
+// Headless browser
+pub use crate::services::_stubs::azazel_headless::{HeadlessBrowserConfig, HeadlessBrowserSession};
 
 // =====================================================================
-// Р С›РЎв‚¬Р С‘Р В±Р С”Р С‘
+// Application State (GUI mode only)
 // =====================================================================
 
-#[derive(Debug, thiserror::Error)]
-pub enum LunaError {
-    #[error("Path '{0}' is outside the current workspace")]
-    OutsideWorkspace(String),
-    #[error("No workspace opened. Call open_workspace first.")]
-    NoWorkspace,
-    #[error("File not found: {0}")]
-    FileNotFound(String),
-    #[error("old_text not found in {0}")]
-    OldTextNotFound(String),
-    #[error("old_text matched {0} times in {1}; please provide more context")]
-    OldTextAmbiguous(usize, String),
-    #[error("old_text == new_text: nothing to change")]
-    NoChange,
-    #[error("Keyring error: {0}")]
-    Keyring(String),
-    #[error("Workspace not found: {0}")]
-    WorkspaceNotFound(String),
-    #[error("Workspace is not a directory: {0}")]
-    WorkspaceNotADir(String),
-    #[error("IO: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("AI provider error: {0}")]
-    Provider(String),
-    #[error("Command '{0}' is not in the allow-list")]
-    CommandNotAllowed(String),
-    // ---- Luna 3D tab (see services/three_d.rs) ----
-    #[error("invalid 3D op: {0}")]
-    ThreeDInvalidOp(&'static str),
-    #[error("3D node id already exists: {0}")]
-    ThreeDIdExists(String),
-    #[error("3D node id missing: {0}")]
-    ThreeDIdMissing(String),
-    #[error("3D parent missing: {0}")]
-    ThreeDParentMissing(String),
-    #[error("3D scene cycle detected")]
-    ThreeDCycle,
-    #[error("3D texture prompt too long")]
-    ThreeDPromptTooLong,
-    #[error("3D texture data too large (max 8MB)")]
-    ThreeDTextureTooLarge,
-    #[error("3D texture data_url is not an image")]
-    ThreeDBadImageDataUrl,
-    #[error("3D scene path is not a file: {0}")]
-    ThreeDScenePathInvalid(String),
-    #[error("3D scene version {0} not supported (max 1)")]
-    ThreeDSceneVersionUnsupported(u32),
-    #[error("Other: {0}")]
-    Other(String),
-}
-
-// Tauri РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљ Result<T, String>; Р С”Р С•Р Р…Р Р†Р ВµРЎР‚РЎвЂљР С‘РЎР‚РЎС“Р ВµР С Р В°Р Р†РЎвЂљР С•Р СР В°РЎвЂљР С‘РЎвЂЎР ВµРЎРѓР С”Р С‘.
-impl serde::Serialize for LunaErrorSerde {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&self.0)
-    }
-}
-
-pub struct LunaErrorSerde(pub String);
-
-impl From<LunaError> for LunaErrorSerde {
-    fn from(e: LunaError) -> Self {
-        LunaErrorSerde(e.to_string())
-    }
-}
-
-impl From<LunaError> for String {
-    fn from(e: LunaError) -> Self {
-        e.to_string()
-    }
-}
-
-// =====================================================================
-// Р РЋР С•РЎРѓРЎвЂљР С•РЎРЏР Р…Р С‘Р Вµ Р С—РЎР‚Р С‘Р В»Р С•Р В¶Р ВµР Р…Р С‘РЎРЏ
-// =====================================================================
-
+#[cfg(feature = "gui")]
 #[derive(Default)]
 pub struct AppState {
     pub workspace_root: Mutex<Option<PathBuf>>,
@@ -721,9 +665,7 @@ fn write_chats(file: &ChatsFile) -> Result<(), String> {
         let _ = std::fs::create_dir_all(parent);
     }
     let json = serde_json::to_string_pretty(file).map_err(|e| e.to_string())?;
-    let tmp = p.with_extension("json.tmp");
-    std::fs::write(&tmp, &json).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &p).map_err(|e| e.to_string())
+    atomic_write_str(&p, &json).map_err(|e| e.to_string())
 }
 
 fn chat_id_new() -> String {
@@ -1253,13 +1195,19 @@ fn require_workspace(state: &State<'_, AppState>) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-fn read_file(path: String, state: State<'_, AppState>) -> Result<String, String> {
+async fn read_file(path: String, state: State<'_, AppState>) -> Result<String, String> {
     let root = require_workspace(&state)?;
     let full = sandbox::resolve(&root, &path).map_err(String::from)?;
     if !full.exists() {
         return Err(LunaError::FileNotFound(path).into());
     }
-    std::fs::read_to_string(&full).map_err(|e| e.to_string())
+    // Sprint-1 B3: async fs so the worker doesn't block on slow disks
+    // or antivirus scans. Note: `full.exists()` stays sync — that's a
+    // tiny metadata query; converting it would delay the cheap error
+    // path for no benefit.
+    tokio::fs::read_to_string(&full)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Generate a short, unique id for an edit. Used as a key into the undo
@@ -1299,8 +1247,25 @@ fn atomic_write(full: &Path, content: &str) -> std::io::Result<u64> {
     Ok(content.len() as u64)
 }
 
+/// Async atomic write helper: write to `<file>.tmp` then rename over the
+/// target via `tokio::fs::*`. Used by the async fs-* Tauri commands so
+/// the I/O happens on tokio's blocking-thread pool instead of a tokio
+/// worker thread.
+///
+/// Sprint-1 blocker B3: the previous sync `atomic_write` blocked a tokio
+/// worker on every file edit / revert in `#[tauri::command]`. The
+/// dispatcher-throttled async variant also preserves the
+/// `write-tmp + rename` atomicity guarantee.
+async fn atomic_write_async(full: &Path, content: &str) -> std::io::Result<u64> {
+    let ext = full.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let tmp = full.with_extension(format!("{ext}.tmp"));
+    tokio::fs::write(&tmp, content).await?;
+    tokio::fs::rename(&tmp, full).await?;
+    Ok(content.len() as u64)
+}
+
 #[tauri::command]
-fn edit_file(
+async fn edit_file(
     path: String,
     old: String,
     new: String,
@@ -1309,7 +1274,11 @@ fn edit_file(
 ) -> Result<EditResult, String> {
     let root = require_workspace(&state)?;
     let full = sandbox::resolve(&root, &path).map_err(String::from)?;
-    let original = std::fs::read_to_string(&full).map_err(|e| e.to_string())?;
+    // Sprint-1 B3: async read so the worker doesn't block on slow disks
+    // or antivirus scans.
+    let original = tokio::fs::read_to_string(&full)
+        .await
+        .map_err(|e| e.to_string())?;
 
     if old.is_empty() {
         return Err(LunaError::OldTextNotFound(path).into());
@@ -1325,7 +1294,10 @@ fn edit_file(
     if updated == original {
         return Err(LunaError::NoChange.into());
     }
-    atomic_write(&full, &updated).map_err(|e| e.to_string())?;
+    // Sprint-1 B3: async atomic write.
+    atomic_write_async(&full, &updated)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let diff_text = diff::unified(&original, &updated, &path);
     let edit_id = new_edit_id();
@@ -1384,13 +1356,13 @@ fn edit_file(
 }
 
 #[tauri::command]
-fn create_file(
+async fn create_file(
     path: String,
     content: String,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<EditResult, String> {
-    // Reject binary content outright РІР‚вЂќ the tool chain (model + tool-message
+    // Reject binary content outright — the tool chain (model + tool-message
     // echo) assumes UTF-8 text. 1 MB is a comfortable upper bound for a
     // single generated file.
     if content.len() > 1_048_576 {
@@ -1405,16 +1377,22 @@ fn create_file(
         return Err(format!("create_file: '{}' already exists", path));
     }
     if let Some(parent) = full.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        // Sprint-1 B3: async fs for directory creation.
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| e.to_string())?;
     }
-    let bytes = atomic_write(&full, &content).map_err(|e| e.to_string())?;
+    // Sprint-1 B3: async atomic write.
+    let bytes = atomic_write_async(&full, &content)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let edit_id = new_edit_id();
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    // `before` is empty for a new file РІР‚вЂќ revert means delete.
+    // `before` is empty for a new file — revert means delete.
     let entry = EditEntry {
         id: edit_id.clone(),
         path: path.clone(),
@@ -1442,7 +1420,7 @@ fn create_file(
 }
 
 #[tauri::command]
-fn revert_file_edit(
+async fn revert_file_edit(
     edit_id: String,
     state: State<'_, AppState>,
     app: AppHandle,
@@ -1467,7 +1445,10 @@ fn revert_file_edit(
     // Sanity: if the file's current contents don't match what we recorded
     // as `after`, refuse to revert (something else has touched the file).
     if full.exists() {
-        let cur = std::fs::read_to_string(&full).map_err(|e| e.to_string())?;
+        // Sprint-1 B3: async fs read.
+        let cur = tokio::fs::read_to_string(&full)
+            .await
+            .map_err(|e| e.to_string())?;
         if cur != entry.after {
             return Err(format!(
                 "revert_file_edit: '{}' was modified externally; refusing to revert. Read the file, merge manually, then retry.",
@@ -1479,14 +1460,20 @@ fn revert_file_edit(
     let bytes: u64;
     let diff_text: String;
     if entry.before.is_empty() {
-        // Reverting a creation РІвЂ вЂ™ delete the file.
+        // Reverting a creation → delete the file.
         if full.exists() {
-            std::fs::remove_file(&full).map_err(|e| e.to_string())?;
+            // Sprint-1 B3: async fs remove.
+            tokio::fs::remove_file(&full)
+                .await
+                .map_err(|e| e.to_string())?;
         }
         bytes = 0;
         diff_text = format!("--- {} (deleted)\n+++ {} (restored)\n", entry.path, entry.path);
     } else {
-        bytes = atomic_write(&full, &entry.before).map_err(|e| e.to_string())?;
+        // Sprint-1 B3: async atomic write.
+        bytes = atomic_write_async(&full, &entry.before)
+            .await
+            .map_err(|e| e.to_string())?;
         diff_text = diff::unified(&entry.after, &entry.before, &entry.path);
     }
 
@@ -1503,11 +1490,22 @@ fn revert_file_edit(
 }
 
 #[tauri::command]
-fn list_dir(path: String, depth: u32, state: State<'_, AppState>) -> Result<Vec<FileEntry>, String> {
+async fn list_dir(path: String, depth: u32, state: State<'_, AppState>) -> Result<Vec<FileEntry>, String> {
     let root = require_workspace(&state)?;
     let full = sandbox::resolve(&root, &path).map_err(String::from)?;
-    let mut out = Vec::new();
-    walk(&full, depth, &mut out, &root).map_err(|e| e.to_string())?;
+    // Sprint-1 B3: `ignore::WalkBuilder` has no async API, so wrap the
+    // potentially-slow directory walk in `spawn_blocking`. This moves
+    // the work to tokio's blocking-thread pool instead of pinning a
+    // tokio worker thread (the old behavior on slow / antivirus-bound
+    // disks caused UI freezes).
+    let out = tokio::task::spawn_blocking(move || -> std::io::Result<Vec<FileEntry>> {
+        let mut out = Vec::new();
+        walk(&full, depth, &mut out, &root)?;
+        Ok(out)
+    })
+    .await
+    .map_err(|e| format!("list_dir: blocking walk join failed: {e}"))?
+    .map_err(|e| e.to_string())?;
     Ok(out)
 }
 
@@ -1524,7 +1522,7 @@ fn walk(
         if p == dir {
             continue;
         }
-        // Р С›РЎвЂљР Р…Р С•РЎРѓР С‘РЎвЂљР ВµР В»РЎРЉР Р…РЎвЂ№Р в„– Р С—РЎС“РЎвЂљРЎРЉ Р С•РЎвЂљ workspace_root.
+        // Относительный путь от workspace_root.
         let rel = p.strip_prefix(root).unwrap_or(p);
         let kind = if p.is_dir() { "dir" } else { "file" };
         let size = p.metadata().map(|m| m.len()).unwrap_or(0);
@@ -8677,7 +8675,7 @@ fn run_task_runner(app: AppHandle, task_id: String) {
     use services::agent::minimax_client::MinimaxClient;
     use services::agent::progress::ProgressEmitter;
     use services::agent::supervisor;
-    use services::agent::task::{TaskResult, TaskStatus};
+    use services::agent::task::{CaseSeverity, CaseStatus, TaskResult, TaskStatus};
     use tokio_util::sync::CancellationToken;
     tokio::spawn(async move {
         // 1. Pull dependencies from the Tauri state.
@@ -8892,6 +8890,14 @@ fn run_task_runner(app: AppHandle, task_id: String) {
                     sub_agent_count: updated.sub_agent_count,
                     total_cost: updated.cost.clone(),
                     persona_payload: sup_result.persona_payload.clone(),
+                    cases: Vec::new(),
+                    task_id: task_id.clone(),
+                    root_cause: None,
+                    findings: Vec::new(),
+                    severity: CaseSeverity::default(),
+                    status: CaseStatus::Closed,
+                    next_steps: Vec::new(),
+                    duration_ms: 0,
                 };
                 if let Err(e) = store.write_result(&task_id, &res) {
                     tracing::error!(target: "agent::runner", task = %task_id, "failed to write result.md: {e}");
@@ -8943,7 +8949,7 @@ async fn run_browser_branch(
     mut emitter: services::agent::progress::ProgressEmitter,
 ) {
     use services::agent::cost::add_response_cost;
-    use services::agent::task::{TaskResult, TaskStatus};
+    use services::agent::task::{CaseSeverity, CaseStatus, TaskResult, TaskStatus};
     use services::azazel::browser::{BrowserSession, LaunchConfig};
     use services::azazel::supervisor::{
         run_browser_loop, BrowserSupervisorResult, SupervisorError,
@@ -9066,6 +9072,14 @@ async fn run_browser_branch(
                 sub_agent_count: 0,
                 total_cost: updated.cost.clone(),
                 persona_payload: None,
+                cases: Vec::new(),
+                task_id: task_id.clone(),
+                root_cause: None,
+                findings: Vec::new(),
+                severity: CaseSeverity::default(),
+                status: CaseStatus::Closed,
+                next_steps: Vec::new(),
+                duration_ms: 0,
             };
             if let Err(e) = store.write_result(&task_id, &res) {
                 tracing::error!(target: "azazel::runner", task = %task_id, "write result: {e}");
@@ -9174,7 +9188,7 @@ async fn run_heal_branch(
     mut emitter: services::agent::progress::ProgressEmitter,
 ) {
     use services::agent::cost::add_response_cost;
-    use services::agent::task::{TaskResult, TaskStatus};
+    use services::agent::task::{CaseSeverity, CaseStatus, TaskResult, TaskStatus};
     use services::morningstar::supervisor::{
         run_heal_loop, HealError, HealSupervisorResult,
     };
@@ -9293,6 +9307,14 @@ async fn run_heal_branch(
                 sub_agent_count: updated.sub_agent_count,
                 total_cost: updated.cost.clone(),
                 persona_payload: None,
+                cases: Vec::new(),
+                task_id: task_id.clone(),
+                root_cause: None,
+                findings: Vec::new(),
+                severity: CaseSeverity::default(),
+                status: CaseStatus::Closed,
+                next_steps: Vec::new(),
+                duration_ms: 0,
             };
             let _ = store.update(&updated);
             let _ = store.write_result(&task_id, &res);
@@ -9353,6 +9375,14 @@ fn finish_terminal_state(
         sub_agent_count: updated.sub_agent_count,
         total_cost: updated.cost.clone(),
         persona_payload: None,
+        cases: Vec::new(),
+        task_id: task_id.to_string(),
+        root_cause: None,
+        findings: Vec::new(),
+        severity: services::agent::task::CaseSeverity::default(),
+        status: services::agent::task::CaseStatus::Closed,
+        next_steps: Vec::new(),
+        duration_ms: 0,
     };
     let _ = store.write_result(task_id, &res);
     let _ = store.flush_steps(task_id);
@@ -9506,9 +9536,10 @@ fn install_hotkey(app: &AppHandle) -> Result<(), GsError> {
 }
 
 // =====================================================================
-// Р СћР С•РЎвЂЎР С”Р В° Р Р†РЎвЂ¦Р С•Р Т‘Р В°
+// Tauri application entry point (gui feature only)
 // =====================================================================
 
+#[cfg(feature = "gui")]
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter("luna_agent=info,tauri=info")

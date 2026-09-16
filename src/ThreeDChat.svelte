@@ -419,13 +419,13 @@ If the user asks for a real human face or a copyrighted character, refuse briefl
     font-size: 11px;
     border-bottom: 1px solid var(--border);
     background: rgba(240, 144, 144, 0.08);
-    color: #f09090;
+    color: var(--error, #f09090);
   }
-  .banner.ok { background: rgba(109, 209, 143, 0.10); color: #6dd18f; }
-  .banner.bad { background: rgba(240, 144, 144, 0.10); color: #f09090; }
+  .banner.ok { background: rgba(109, 209, 143, 0.10); color: var(--success, #6dd18f); }
+  .banner.bad { background: rgba(240, 144, 144, 0.10); color: var(--error, #f09090); }
   .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-  .dot.ok { background: #6dd18f; }
-  .dot.bad { background: #f09090; }
+  .dot.ok { background: var(--success, #6dd18f); }
+  .dot.bad { background: var(--error, #f09090); }
   .banner .link {
     margin-left: auto;
     background: transparent; color: inherit;
@@ -440,15 +440,15 @@ If the user asks for a real human face or a copyrighted character, refuse briefl
     display: flex; flex-direction: column; gap: 6px;
   }
   .msg { font-size: 12px; padding: 6px 8px; border-radius: 6px; max-width: 95%; }
-  .msg .role { font-size: 9px; text-transform: uppercase; color: #6c7280; margin-bottom: 2px; letter-spacing: 0.4px; }
+  .msg .role { font-size: 9px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 2px; letter-spacing: 0.4px; }
   .msg.user { background: var(--accent-soft); color: var(--text); align-self: flex-end; }
-  .msg.assistant { background: #1c1f26; color: var(--text); }
-  .msg.assistant.streaming { background: #1c1f26; }
+  .msg.assistant { background: var(--bg-elevated); color: var(--text); }
+  .msg.assistant.streaming { background: var(--bg-elevated); }
   .msg.system { background: transparent; color: var(--text-muted); font-style: italic; }
-  .msg.tool { background: #0f1217; color: var(--accent-strong); font-family: ui-monospace, monospace; }
+  .msg.tool { background: var(--bg-input); color: var(--accent-strong); font-family: ui-monospace, monospace; }
   .msg.tool-result { font-family: ui-monospace, monospace; }
-  .msg.tool-result.ok { background: #14331f; color: #6dd18f; }
-  .msg.tool-result.err { background: #2a1818; color: #f09090; }
+  .msg.tool-result.ok { background: var(--success-bg, #14331f); color: var(--success, #6dd18f); }
+  .msg.tool-result.err { background: var(--error-bg, #2a1818); color: var(--error, #f09090); }
   .thumb { margin-top: 4px; }
   .thumb img { max-width: 100%; border-radius: 4px; display: block; }
   code { background: #00000040; padding: 1px 4px; border-radius: 3px; }
@@ -459,22 +459,22 @@ If the user asks for a real human face or a copyrighted character, refuse briefl
     border: 1px solid rgba(74, 120, 200, 0.25);
     border-radius: 6px;
     font-size: 12px;
-    color: #c8d2e0;
+    color: var(--text);
   }
   .thoughts-head {
     display: flex; align-items: center; gap: 6px;
     width: 100%;
     padding: 6px 10px;
-    background: transparent; border: 0; color: #9ab0d0;
+    background: transparent; border: 0; color: var(--info);
     cursor: pointer; font: inherit; font-size: 11px; font-weight: 500;
     text-align: left;
   }
-  .thoughts-head:hover { color: #c8d2e0; }
+  .thoughts-head:hover { color: var(--text); }
   .t-icon { font-size: 14px; }
   .t-title { letter-spacing: 0.3px; }
   .t-count {
     margin-left: 4px; padding: 1px 6px; border-radius: 8px;
-    background: rgba(74, 120, 200, 0.20); color: #9ab0d0;
+    background: rgba(74, 120, 200, 0.20); color: var(--info);
     font-size: 10px;
   }
   .t-chev { margin-left: auto; opacity: 0.6; }
@@ -484,10 +484,10 @@ If the user asks for a real human face or a copyrighted character, refuse briefl
     border-left: 2px solid rgba(74, 120, 200, 0.5);
     padding: 4px 8px; border-radius: 0 4px 4px 0;
     font-size: 11px; line-height: 1.45;
-    color: #c0c8d6;
+    color: var(--text);
     white-space: pre-wrap;
   }
-  .thought.streaming { border-left-color: #6ea8ff; }
+  .thought.streaming { border-left-color: var(--info); }
 
   .cursor { animation: blink 1s steps(1) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
@@ -495,19 +495,19 @@ If the user asks for a real human face or a copyrighted character, refuse briefl
   .composer {
     display: flex; gap: 4px; padding: 6px 8px; border-top: 1px solid var(--border);
   }
-  .composer input { flex: 1; background: #0f1217; color: #e6e8eb; border: 1px solid #2c313a; border-radius: 4px; padding: 5px 8px; font: inherit; }
+  .composer input { flex: 1; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 5px 8px; font: inherit; }
   .composer input:disabled { opacity: 0.5; }
-  button.primary { background: #4a78c8; color: white; border: 1px solid #4a78c8; border-radius: 4px; padding: 4px 12px; cursor: pointer; }
+  button.primary { background: var(--info); color: var(--text-inverse); border: 1px solid var(--info); border-radius: 4px; padding: 4px 12px; cursor: pointer; }
   button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 
   /* ---- ThreeDChat light theme ---- */
   :global(html:not(.theme-dark)) .tdc-header { background: rgba(242,238,232,0.9); border-bottom-color: rgba(176,160,140,0.25); }
-  :global(html:not(.theme-dark)) .tdc-title { color: #1a1c20; }
+  :global(html:not(.theme-dark)) .tdc-title { color: var(--text); }
   :global(html:not(.theme-dark)) .tdc-msg { background: rgba(242,238,232,0.9); border-color: rgba(176,160,140,0.25); }
   :global(html:not(.theme-dark)) .tdc-msg.user { background: rgba(176,120,120,0.08); border-color: rgba(176,120,120,0.25); }
-  :global(html:not(.theme-dark)) .tdc-msg-text { color: #1a1c20; }
-  :global(html:not(.theme-dark)) .tdc-input { background: rgba(255,255,255,0.8); border-color: rgba(176,160,140,0.3); color: #1a1c20; }
-  :global(html:not(.theme-dark)) .tdc-btn { background: rgba(176,120,120,0.85); border-color: transparent; color: #fff; }
+  :global(html:not(.theme-dark)) .tdc-msg-text { color: var(--text); }
+  :global(html:not(.theme-dark)) .tdc-input { background: rgba(255,255,255,0.8); border-color: rgba(176,160,140,0.3); color: var(--text); }
+  :global(html:not(.theme-dark)) .tdc-btn { background: rgba(176,120,120,0.85); border-color: transparent; color: var(--text-inverse); }
 
 </style>

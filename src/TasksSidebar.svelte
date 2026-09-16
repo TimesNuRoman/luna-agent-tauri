@@ -4,9 +4,12 @@
     taskList,
     taskGet,
     taskDelete,
+    taskCancel,
+    taskCreate,
     healProject,
     statusLabel,
     formatTokens,
+    titleFromPrompt,
     type TaskSummary,
     type Task,
     type TaskStatus,
@@ -31,6 +34,9 @@
   let error: string | null = null;
   let selectedTask: Task | null = null;
   let selectedLoading = false;
+  // F6: per-step cost. Loaded when the detail modal opens.
+  let stepDetails: Array<Record<string, unknown>> = [];
+  let stepsLoading = false;
   let refreshInterval: ReturnType<typeof setInterval> | null = null;
   /// True while we're spawning a heal task. Disables the
   /// "🌟 Heal" button to prevent double-clicks.
@@ -55,6 +61,8 @@
 
   async function openDetail(t: TaskSummary) {
     selectedLoading = true;
+    stepsLoading = true;
+    stepDetails = [];
     try {
       selectedTask = await taskGet(t.id);
     } catch (e) {
@@ -62,17 +70,83 @@
     } finally {
       selectedLoading = false;
     }
+    // F6: per-step cost from the `task_steps` IPC. Best-effort: if it
+    // fails, we just keep the modal without per-step rows.
+    try {
+      const { taskSteps } = await import('./lib/taskClient');
+      const steps = await taskSteps(t.id);
+      stepDetails = Array.isArray(steps) ? steps : [];
+    } catch {
+      stepDetails = [];
+    } finally {
+      stepsLoading = false;
+    }
   }
 
   function closeDetail() {
     selectedTask = null;
+    stepDetails = [];
   }
+
+  /// F6: extract a numeric USD cost from a step record. The Rust
+  /// TaskStep type carries `cost_usd` (f64) plus token fields; we
+  /// accept any number-like value to be forward-compatible.
+  function stepCostUsd(s: Record<string, unknown>): number {
+    const c = s.cost_usd ?? s.costUsd ?? s.usd;
+    return typeof c === 'number' && Number.isFinite(c) ? c : 0;
+  }
+  function stepLabel(s: Record<string, unknown>): string {
+    const t = (s.type ?? s.kind ?? 'step') as string;
+    const idx = (s.index ?? s.step ?? s.seq) as number | undefined;
+    return idx !== undefined ? `${t} #${idx}` : t;
+  }
+  function stepTokens(s: Record<string, unknown>): { inTok: number; outTok: number } {
+    const i = (s.input_tokens ?? s.inputTokens ?? 0) as number;
+    const o = (s.output_tokens ?? s.outputTokens ?? 0) as number;
+    return { inTok: i, outTok: o };
+  }
+  $: totalStepUsd = stepDetails.reduce((sum, s) => sum + stepCostUsd(s), 0);
+  $: hasStepCost = stepDetails.some((s) => stepCostUsd(s) > 0);
 
   async function deleteTask(t: TaskSummary) {
     if (!confirm(`Delete task "${t.title || t.id}"? This removes all its files and cannot be undone.`)) return;
     try {
       await taskDelete(t.id);
       if (selectedTask?.id === t.id) selectedTask = null;
+      await refresh();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  /// F2: cancel a running/pending task. The button is only rendered for
+  /// tasks whose status is 'pending' or 'running'. `taskCancel` is
+  /// idempotent on the backend, so a double-click is safe.
+  async function cancelTask(t: TaskSummary, ev: Event) {
+    ev.stopPropagation();
+    try {
+      await taskCancel(t.id);
+      // The 5s poll will pick up the new status, but call refresh()
+      // immediately so the UI flips within ~100ms.
+      await refresh();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  /// F6: retry a failed/cancelled/timed_out task by re-spawning it with
+  /// the same prompt. Title is preserved if available; otherwise we
+  /// derive a short title from the prompt.
+  async function retryTask(t: TaskSummary, ev: Event) {
+    ev.stopPropagation();
+    try {
+      const full = await taskGet(t.id);
+      const title = (full.title && full.title.trim()) || titleFromPrompt(full.prompt);
+      await taskCreate({
+        title: `${title} (retry)`,
+        prompt: full.prompt,
+        personaId: undefined,
+      });
       await refresh();
     } catch (e) {
       error = String(e);
@@ -202,12 +276,30 @@
             {formatTs(t.started_at ?? t.created_at)}
             {#if t.cancellation_requested}<span class="ts-cancel-flag">· cancel requested</span>{/if}
           </div>
-          <button
-            class="ts-btn-danger"
-            on:click|stopPropagation={() => deleteTask(t)}
-            title="Delete task and all its files">
-            ×
-          </button>
+          <!-- F2: cancel button for active tasks. F6: retry for terminal-failure states. -->
+          <div class="ts-item-actions">
+            {#if t.status === 'pending' || t.status === 'running'}
+              <button
+                class="ts-btn-cancel"
+                on:click|stopPropagation={(e) => cancelTask(t, e)}
+                title="Отменить задачу"
+                aria-label="Cancel task {t.title || t.id}">■</button>
+            {/if}
+            {#if t.status === 'failed' || t.status === 'cancelled' || t.status === 'timed_out'}
+              <button
+                class="ts-btn-retry"
+                on:click|stopPropagation={(e) => retryTask(t, e)}
+                title="Перезапустить с тем же промптом"
+                aria-label="Retry task {t.title || t.id}">↻</button>
+            {/if}
+            <button
+              class="ts-btn-danger"
+              on:click|stopPropagation={() => deleteTask(t)}
+              title="Delete task and all its files"
+              aria-label="Delete task {t.title || t.id}">
+              ×
+            </button>
+          </div>
         </li>
       {/each}
     </ul>
@@ -251,6 +343,42 @@
               <strong>Error:</strong>
               <pre>{selectedTask.error}</pre>
             </div>
+          {/if}
+
+          <!-- F6: per-step cost breakdown. Hidden if there are no
+               steps or no step carries cost_usd. -->
+          {#if stepDetails.length > 0}
+            <details open class="ts-steps-block">
+              <summary>
+                Per-step cost ({stepDetails.length} step{stepDetails.length === 1 ? '' : 's'}
+                {#if hasStepCost}· total ~${totalStepUsd.toFixed(4)}{/if})
+              </summary>
+              {#if stepsLoading}
+                <p class="muted">Loading steps…</p>
+              {:else}
+                <table class="ts-steps-table">
+                  <thead>
+                    <tr>
+                      <th>Step</th>
+                      <th class="num">In</th>
+                      <th class="num">Out</th>
+                      <th class="num">USD</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each stepDetails as s, i (i)}
+                      {@const tk = stepTokens(s)}
+                      <tr>
+                        <td>{stepLabel(s)}</td>
+                        <td class="num">{formatTokens(tk.inTok)}</td>
+                        <td class="num">{formatTokens(tk.outTok)}</td>
+                        <td class="num">{stepCostUsd(s) > 0 ? `$${stepCostUsd(s).toFixed(4)}` : '—'}</td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              {/if}
+            </details>
           {/if}
 
           <details>
@@ -302,8 +430,8 @@
     transition: background 0.15s, color 0.15s;
   }
   .ts-heal:hover:not(:disabled) {
-    background: rgba(255, 215, 0, 0.12);
-    color: #f5c518;
+    background: var(--accent-soft);
+    color: var(--accent);
   }
   .ts-heal:disabled {
     opacity: 0.5;
@@ -366,7 +494,7 @@
   }
   .ts-item {
     position: relative;
-    padding: 10px 32px 10px 12px;
+    padding: 10px 12px 10px 12px;
     border-bottom: 1px solid var(--border, #e3e3e6);
     cursor: pointer;
     transition: background 80ms ease;
@@ -378,6 +506,7 @@
     justify-content: space-between;
     gap: 8px;
     margin-bottom: 4px;
+    padding-right: 80px;
   }
   .ts-title {
     font-size: 13px;
@@ -397,22 +526,95 @@
     font-weight: 500;
   }
   .ts-btn-danger {
-    position: absolute;
-    top: 6px;
-    right: 6px;
+    position: relative;
     border: none;
     background: transparent;
     color: var(--text-muted, #6b6b70);
     cursor: pointer;
-    font-size: 16px;
+    font-size: 14px;
     line-height: 1;
     padding: 2px 6px;
     border-radius: 4px;
     opacity: 0;
     transition: opacity 80ms ease, background 80ms ease;
   }
-  .ts-item:hover .ts-btn-danger { opacity: 1; }
+  .ts-item:hover .ts-btn-danger,
+  .ts-item:hover .ts-btn-cancel,
+  .ts-item:hover .ts-btn-retry { opacity: 1; }
   .ts-btn-danger:hover { background: rgba(176, 48, 48, 0.1); color: #b03030; }
+  /* F2: cancel button for in-flight tasks */
+  .ts-btn-cancel {
+    position: relative;
+    border: none;
+    background: transparent;
+    color: var(--text-muted, #6b6b70);
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 4px;
+    opacity: 0;
+    transition: opacity 80ms ease, background 80ms ease;
+  }
+  .ts-btn-cancel:hover { background: rgba(176, 96, 0, 0.12); color: #b65a00; }
+  /* F6: retry button for failed/cancelled tasks */
+  .ts-btn-retry {
+    position: relative;
+    border: none;
+    background: transparent;
+    color: var(--text-muted, #6b6b70);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 4px;
+    opacity: 0;
+    transition: opacity 80ms ease, background 80ms ease;
+  }
+  .ts-btn-retry:hover { background: rgba(74, 111, 207, 0.12); color: var(--accent, #4a6fcf); }
+  .ts-item-actions {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: flex;
+    gap: 2px;
+    align-items: center;
+  }
+  /* F6: per-step cost table */
+  .ts-steps-block {
+    margin: 10px 0;
+    font-size: 12px;
+  }
+  .ts-steps-block summary {
+    cursor: pointer;
+    font-weight: 500;
+    padding: 4px 0;
+    color: var(--text-muted, #6b6b70);
+  }
+  .ts-steps-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 4px;
+    font-size: 12px;
+  }
+  .ts-steps-table th,
+  .ts-steps-table td {
+    text-align: left;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border, #e3e3e6);
+  }
+  .ts-steps-table th.num,
+  .ts-steps-table td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .ts-steps-table th {
+    color: var(--text-muted, #6b6b70);
+    font-weight: 500;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
 
   .ts-pill {
     display: inline-block;
@@ -534,17 +736,6 @@
   }
 
 
-  /* ---- TasksSidebar light theme ---- */
-  :global(html:not(.theme-dark)) .tasks-sidebar { background: rgba(242,238,232,0.95); border-right-color: rgba(176,160,140,0.2); }
-  :global(html:not(.theme-dark)) .tasks-header { border-bottom-color: rgba(176,160,140,0.2); }
-  :global(html:not(.theme-dark)) .tasks-title { color: #1a1c20; }
-  :global(html:not(.theme-dark)) .tasks-search { background: rgba(255,255,255,0.8); border-color: rgba(176,160,140,0.3); color: #1a1c20; }
-  :global(html:not(.theme-dark)) .tasks-item { color: #5a6068; border-bottom-color: rgba(176,160,140,0.1); }
-  :global(html:not(.theme-dark)) .tasks-item:hover { background: rgba(176,120,120,0.05); color: #1a1c20; }
-  :global(html:not(.theme-dark)) .tasks-item.active { background: rgba(176,120,120,0.1); color: #8a4848; }
-  :global(html:not(.theme-dark)) .tasks-item-title { color: #1a1c20; }
-  :global(html:not(.theme-dark)) .tasks-badge { background: rgba(176,120,120,0.12); color: #8a4848; }
-  :global(html:not(.theme-dark)) .tasks-badge.done { background: rgba(94,146,114,0.12); color: #2f6a45; }
-  :global(html:not(.theme-dark)) .tasks-empty { color: #8a8f97; }
+
 
 </style>

@@ -438,9 +438,9 @@
     background: rgba(0, 0, 0, 0.04);
     color: var(--text-muted, #6b6b70);
   }
-  .ps-stat-running { color: #4a6fcf; }
-  .ps-stat-error { color: #b03030; }
-  .ps-stat-done { color: #1b7a3a; }
+  .ps-stat-running { color: var(--info); }
+  .ps-stat-error { color: var(--danger); }
+  .ps-stat-done { color: var(--success); }
 
   .ps-list {
     flex: 1;
@@ -589,7 +589,7 @@
   }
   .ps-mini:hover:not(:disabled) { background: rgba(0, 0, 0, 0.05); color: var(--text, #1c1c1e); }
   .ps-mini:disabled { opacity: 0.3; cursor: not-allowed; }
-  .ps-mini.danger:hover { background: rgba(176, 48, 48, 0.1); color: #b03030; }
+  .ps-badge { background: var(--danger-soft); color: var(--danger); }
   .ps-step-note {
     font-size: 11px;
     color: var(--text-muted, #6b6b70);
@@ -658,16 +658,16 @@
     font-family: inherit;
   }
   .ps-menu-item:hover { background: var(--bg-hover, rgba(0, 0, 0, 0.04)); }
-  .ps-menu-item.danger { color: #b03030; }
-  .ps-menu-item.danger:hover { background: rgba(176, 48, 48, 0.08); }
+  .ps-menu-item.danger { color: var(--danger); }
+  .ps-menu-item.danger:hover { background: var(--danger-soft); }
 
   .ps-card-meta {
     margin-top: 6px;
     font-size: 10px;
     color: var(--text-muted, #6b6b70);
   }
-  .ps-link-flag { color: #4a6fcf; }
-  .ps-agent-flag { color: #b65a00; }
+  .ps-link-flag { color: var(--info); }
+  .ps-agent-flag { color: var(--warn); }
 
   .ps-footer {
     padding: 8px 12px;
@@ -684,20 +684,9 @@
     font-size: 11px;
     font-family: inherit;
   }
-  .ps-clear:hover { border-color: #b03030; color: #b03030; }
+  .ps-clear:hover { border-color: var(--danger); color: var(--danger); }
 
 
-  /* ---- PlansSidebar light theme ---- */
-  :global(html:not(.theme-dark)) .plans-sidebar { background: rgba(242,238,232,0.95); border-right-color: rgba(176,160,140,0.2); }
-  :global(html:not(.theme-dark)) .plans-header { border-bottom-color: rgba(176,160,140,0.2); }
-  :global(html:not(.theme-dark)) .plans-title { color: #1a1c20; }
-  :global(html:not(.theme-dark)) .plans-search { background: rgba(255,255,255,0.8); border-color: rgba(176,160,140,0.3); color: #1a1c20; }
-  :global(html:not(.theme-dark)) .plans-item { color: #5a6068; border-bottom-color: rgba(176,160,140,0.1); }
-  :global(html:not(.theme-dark)) .plans-item:hover { background: rgba(176,120,120,0.05); color: #1a1c20; }
-  :global(html:not(.theme-dark)) .plans-item.active { background: rgba(176,120,120,0.1); color: #8a4848; border-left-color: #8a4848; }
-  :global(html:not(.theme-dark)) .plans-item-title { color: #1a1c20; }
-  :global(html:not(.theme-dark)) .plans-item-meta { color: #8a8f97; }
-  :global(html:not(.theme-dark)) .plans-empty { color: #8a8f97; }
-  :global(html:not(.theme-dark)) .plans-btn { background: rgba(255,255,255,0.7); border-color: rgba(176,160,140,0.3); color: #5a6068; }
+
 
 </style>

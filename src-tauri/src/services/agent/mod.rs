@@ -5,7 +5,7 @@
 //! document at `~/.minimax/.../artifacts/plan.md` for the design.
 //!
 //! ## Layout
-//! - `task.rs`           — types: `Task`, `TaskStatus`, `TaskStep`, `TaskResult`, `TaskCost`
+//! - `task.rs`           — types: `Task`, `TaskStatus`, `TaskStep`, `TaskResult`, `CaseResult`, `CaseEntry`, `TaskCost`
 //! - `task_store.rs`     — on-disk persistence (`<app_local_data>/tasks/`)
 //! - `manager.rs`        — in-memory registry, queue, max-concurrent
 //! - `cost.rs`           — per-model token pricing + USD estimation
@@ -41,6 +41,7 @@ pub mod supervisor;
 pub mod task;
 pub mod task_store;
 pub mod vision_tools;     // Phase 1: Visual Grounding
+pub mod workflow;         // DSL-style workflow engine with typed edges
 
 // Re-exports for convenience in Tauri commands.
 #[allow(unused_imports)]
@@ -57,12 +58,13 @@ pub use persona_tools::{FusionNewsItem, PersonaPayloadSink, PersonaToolContext};
 #[allow(unused_imports)]
 pub use progress::{LiveKind, ProgressEmitter, RATE_LIMIT_HZ, RATE_LIMIT_INTERVAL};
 #[allow(unused_imports)]
-pub use runner::{SupervisorKind, TaskRunner};
+pub use runner::{start_heartbeat, SupervisorKind, TaskRunner};
 #[allow(unused_imports)]
 pub use supervisor::{run_loop as run_supervisor_loop, CostChunk, SupervisorResult};
 #[allow(unused_imports)]
 pub use task::{
-    defaults, Task, TaskCost, TaskKind, TaskResult, TaskStatus, TaskStep, TaskSummary,
+    defaults, CaseEntry, CaseResult, Task, TaskCost, TaskKind, TaskResult, TaskStatus, TaskStep,
+    TaskSummary,
 };
 #[allow(unused_imports)]
 pub use task_store::{StoreError, StoreResult, TaskStore};

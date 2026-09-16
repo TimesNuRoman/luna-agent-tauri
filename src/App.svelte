@@ -559,8 +559,8 @@
     min-height: 0;
   }
   .badge {
-    background: #b13b3b;
-    color: #fff;
+    background: var(--danger);
+    color: var(--text-inverse);
     font-size: 10px;
     padding: 0 5px;
     border-radius: 8px;
@@ -568,23 +568,6 @@
   }
 
 
-  /* ---- App light theme ---- */
-  :global(html:not(.theme-dark)) .app-shell { background: #f5f2ee; }
-  :global(html:not(.theme-dark)) .topbar { background: rgba(248,244,238,0.92); border-bottom-color: rgba(176,160,140,0.25); }
-  :global(html:not(.theme-dark)) .topbar-btn { color: #5a6068; }
-  :global(html:not(.theme-dark)) .topbar-btn:hover { color: #1a1c20; background: rgba(176,120,120,0.08); }
-  :global(html:not(.theme-dark)) .tab-bar { background: rgba(242,238,232,0.8); border-bottom-color: rgba(176,160,140,0.2); }
-  :global(html:not(.theme-dark)) .tab { color: #5a6068; }
-  :global(html:not(.theme-dark)) .tab:hover { color: #1a1c20; }
-  :global(html:not(.theme-dark)) .tab.active { color: #8a4848; border-bottom-color: #8a4848; }
-  :global(html:not(.theme-dark)) .sidebar { background: rgba(240,236,230,0.95); border-right-color: rgba(176,160,140,0.2); }
-  :global(html:not(.theme-dark)) .sidebar-section-title { color: #8a8f97; }
-  :global(html:not(.theme-dark)) .sidebar-item { color: #5a6068; }
-  :global(html:not(.theme-dark)) .sidebar-item:hover { background: rgba(176,120,120,0.06); color: #1a1c20; }
-  :global(html:not(.theme-dark)) .sidebar-item.active { background: rgba(176,120,120,0.12); color: #8a4848; }
-  :global(html:not(.theme-dark)) .main-content { background: #f5f2ee; }
-  :global(html:not(.theme-dark)) .panel { background: #f5f2ee; }
-  :global(html:not(.theme-dark)) .panel-header { border-bottom-color: rgba(176,160,140,0.2); color: #1a1c20; }
-  :global(html:not(.theme-dark)) .divider { background: rgba(176,160,140,0.2); }
+
 
 </style>

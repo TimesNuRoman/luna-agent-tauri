@@ -213,6 +213,11 @@ pub struct Task {
     pub steps_completed: u32,
     /// Number of sub-agents dispatched.
     pub sub_agent_count: u32,
+    /// Override the heartbeat interval (default is 30 s). `None`
+    /// means "use the supervisor default". Allows personas or
+    /// long-running tasks to tune the stale-detection cadence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heartbeat_interval: Option<std::time::Duration>,
 }
 
 impl Task {
@@ -307,6 +312,7 @@ impl Task {
             cancellation_requested: false,
             steps_completed: 0,
             sub_agent_count: 0,
+            heartbeat_interval: None,
         }
     }
 
@@ -423,20 +429,84 @@ pub enum TaskStep {
 }
 
 // =====================================================================
-// TaskResult (final answer, written to result.md)
+// CaseResult (structured final answer, written to result.md)
 // =====================================================================
 
-/// The final, user-facing result. Written to `result.md` on completion.
+/// Severity level for case classification (TC4).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CaseSeverity {
+    #[default]
+    Medium,
+    Critical,
+    High,
+    Low,
+    Informational,
+}
+
+/// Status for case lifecycle management (TC4).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CaseStatus {
+    #[default]
+    Open,
+    InProgress,
+    Closed,
+    Reopened,
+}
+
+/// One step or logical unit within a case, describing what the agent did.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskResult {
+pub struct CaseEntry {
+    /// Human-readable category for this step (e.g. "file_read", "code_edit").
+    pub category: String,
+    /// Brief description of what happened.
+    pub message: String,
+    /// List of actions/steps taken to produce this entry.
+    #[serde(default)]
+    pub steps_taken: Vec<String>,
+}
+
+/// The final, user-facing result. Written to `result.md` on completion.
+/// Contains the flat summary fields for backward compatibility, plus a
+/// structured `cases` vector for detailed audit/history.
+///
+/// TC4 fields: `task_id`, `root_cause`, `findings`, `severity`, `status`,
+/// `next_steps`, `duration_ms` extend the original flat `TaskResult` with
+/// structured case management fields from the Tracecat integration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CaseResult {
+    /// Task identifier (from the originating task).
+    #[serde(default)]
+    pub task_id: String,
     /// Final assistant text (markdown).
     pub summary: String,
+    /// Root cause analysis (populated by analyze_root_cause if error occurred).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_cause: Option<String>,
+    /// List of findings discovered during execution.
+    #[serde(default)]
+    pub findings: Vec<String>,
     /// Files touched by the supervisor (paths from tool_use).
+    #[serde(default)]
     pub files_changed: Vec<String>,
     /// How many sub-agents were dispatched.
+    #[serde(default)]
     pub sub_agent_count: u32,
     /// Total cost at the time of completion.
     pub total_cost: TaskCost,
+    /// Severity level (TC4).
+    #[serde(default)]
+    pub severity: CaseSeverity,
+    /// Case status (TC4).
+    #[serde(default)]
+    pub status: CaseStatus,
+    /// Recommended next steps.
+    #[serde(default)]
+    pub next_steps: Vec<String>,
+    /// Execution duration in milliseconds.
+    #[serde(default)]
+    pub duration_ms: u64,
     /// Persona-specific structured output. Set by persona tools such
     /// as `produce_fusion_payload` (Raziel's Fusion News feed), the
     /// runner copies it from the supervisor's `SupervisorResult`
@@ -445,21 +515,56 @@ pub struct TaskResult {
     /// and personas that don't emit a structured payload.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persona_payload: Option<serde_json::Value>,
+    /// Structured case log with category/message/steps_taken for each event.
+    #[serde(default)]
+    pub cases: Vec<CaseEntry>,
 }
 
-impl TaskResult {
+impl Default for CaseResult {
+    fn default() -> Self {
+        Self {
+            task_id: String::new(),
+            summary: String::new(),
+            root_cause: None,
+            findings: Vec::new(),
+            files_changed: Vec::new(),
+            sub_agent_count: 0,
+            total_cost: TaskCost::default(),
+            severity: CaseSeverity::default(),
+            status: CaseStatus::default(),
+            next_steps: Vec::new(),
+            duration_ms: 0,
+            persona_payload: None,
+            cases: Vec::new(),
+        }
+    }
+}
+
+impl CaseResult {
     /// Build a stub result from a task, used when writing the initial
     /// `result.md` placeholder. Replaced with the real result on completion.
     pub fn placeholder(task: &Task) -> Self {
         Self {
+            task_id: task.id.clone(),
             summary: format!("# {}\n\n*(in progress)*\n", task.title),
+            root_cause: None,
+            findings: Vec::new(),
             files_changed: Vec::new(),
             sub_agent_count: 0,
             total_cost: task.cost.clone(),
+            severity: CaseSeverity::default(),
+            status: CaseStatus::Open,
+            next_steps: Vec::new(),
+            duration_ms: 0,
             persona_payload: None,
+            cases: Vec::new(),
         }
     }
 }
+
+/// Backward-compatible alias for `CaseResult`.
+/// Existing code that uses `TaskResult` will continue to work unchanged.
+pub type TaskResult = CaseResult;
 
 // =====================================================================
 // Defaults / config

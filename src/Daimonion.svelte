@@ -267,23 +267,23 @@
   }
   .subtitle {
     font-weight: 400;
-    color: #888;
+    color: var(--text-muted);
     font-size: 13px;
   }
   .status {
     font-size: 12px;
     padding: 2px 8px;
     border-radius: 12px;
-    background: #f0f0f0;
+    background: var(--bg-hover);
   }
-  .status-recording { background: #fee; color: #c33; }
-  .status-thinking  { background: #ffe; color: #886; }
-  .status-speaking  { background: #efe; color: #383; }
-  .status-error     { background: #fdd; color: #800; }
+  .status-recording { background: var(--danger-soft); color: var(--danger); }
+  .status-thinking  { background: var(--warn-soft); color: var(--warn); }
+  .status-speaking  { background: var(--success-soft); color: var(--success); }
+  .status-error     { background: var(--danger-soft); color: var(--danger); }
   .controls { display: flex; gap: 8px; }
   button {
-    border: 1px solid #ccc;
-    background: #fff;
+    border: 1px solid var(--border);
+    background: var(--text-inverse);
     padding: 6px 12px;
     border-radius: 6px;
     cursor: pointer;
@@ -291,7 +291,7 @@
   }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   .mic { flex: 1; }
-  .ghost { background: #f6f6f6; }
+  .ghost { background: var(--bg-hover); }
   .text-input {
     display: flex;
     gap: 6px;
@@ -299,7 +299,7 @@
   .text-input input {
     flex: 1;
     padding: 6px 10px;
-    border: 1px solid #ccc;
+    border: 1px solid var(--border);
     border-radius: 6px;
   }
   .history {
@@ -309,28 +309,27 @@
     flex-direction: column;
     gap: 6px;
     padding: 8px;
-    background: #fafafa;
+    background: var(--bg-elevated);
     border-radius: 6px;
     min-height: 100px;
   }
   .turn { display: flex; gap: 6px; font-size: 13px; }
-  .turn-user .role { color: #06c; }
-  .turn-assistant .role { color: #c60; }
+  .turn-user .role { color: var(--info); }
+  .turn-assistant .role { color: var(--warn); }
   .role { font-weight: 600; min-width: 64px; }
-  footer { font-size: 11px; color: #888; }
-
+  footer { font-size: 11px; color: var(--text-muted); }
 
   /* ---- Daimonion light theme ---- */
   :global(html:not(.theme-dark)) .daim-header { background: rgba(242,238,232,0.9); border-bottom-color: rgba(176,160,140,0.25); }
-  :global(html:not(.theme-dark)) .daim-title { color: #1a1c20; }
-  :global(html:not(.theme-dark)) .daim-subtitle { color: #5a6068; }
-  :global(html:not(.theme-dark)) .daim-btn { background: rgba(255,255,255,0.7); border-color: rgba(176,160,140,0.3); color: #5a6068; }
-  :global(html:not(.theme-dark)) .daim-btn:hover { background: rgba(176,120,120,0.08); border-color: rgba(176,120,120,0.4); color: #8a4848; }
-  :global(html:not(.theme-dark)) .daim-btn.active { background: rgba(176,120,120,0.85); border-color: transparent; color: #fff; }
+  .daim-title { color: var(--text); }
+  .daim-subtitle { color: var(--text-muted); }
+  .daim-btn { background: var(--bg-elevated); border-color: var(--border); color: var(--text-muted); }
+  .daim-btn:hover { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
+  .daim-btn.active { background: var(--danger); border-color: transparent; color: var(--text-inverse); }
   :global(html:not(.theme-dark)) .daim-persona { background: rgba(242,238,232,0.9); border-color: rgba(176,160,140,0.25); }
-  :global(html:not(.theme-dark)) .daim-persona-name { color: #1a1c20; }
-  :global(html:not(.theme-dark)) .daim-persona-desc { color: #5a6068; }
+  .daim-persona-name { color: var(--text); }
+  .daim-persona-desc { color: var(--text-muted); }
   :global(html:not(.theme-dark)) .daim-transcript { background: rgba(242,238,232,0.6); border-color: rgba(176,160,140,0.2); }
-  :global(html:not(.theme-dark)) .daim-wake-word { background: rgba(176,120,120,0.1); border-color: rgba(176,120,120,0.3); color: #8a4848; }
+  .daim-wake-word { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
 
 </style>

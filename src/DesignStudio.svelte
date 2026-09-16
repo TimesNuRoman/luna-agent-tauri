@@ -387,8 +387,8 @@
   .ds-root {
     width: 280px;
     flex-shrink: 0;
-    border-right: 1px solid var(--border, #e3e3e6);
-    background: var(--bg-elevated, #fafafa);
+    border-right: 1px solid var(--border);
+    background: var(--bg-elevated);
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -399,13 +399,13 @@
     align-items: center;
     justify-content: space-between;
     padding: 10px 12px;
-    border-bottom: 1px solid var(--border, #e3e3e6);
+    border-bottom: 1px solid var(--border);
   }
   .ds-header h3 { margin: 0; font-size: 13px; font-weight: 600; }
   .ds-badge {
     display: inline-block;
-    background: var(--accent, #c9a45c);
-    color: #fff;
+    background: var(--accent);
+    color: var(--text-inverse);
     padding: 1px 7px;
     border-radius: 8px;
     font-size: 10px;
@@ -415,7 +415,7 @@
   .ds-switch, .ds-refresh {
     border: none;
     background: transparent;
-    color: var(--text-muted, #6b6b70);
+    color: var(--text-muted);
     cursor: pointer;
     font-size: 14px;
     line-height: 1;
@@ -430,13 +430,13 @@
     flex-wrap: wrap;
     gap: 2px;
     padding: 6px 8px;
-    border-bottom: 1px solid var(--border, #e3e3e6);
+    border-bottom: 1px solid var(--border);
   }
   .ds-nav-btn {
     flex: 1 1 30%;
     border: none;
     background: transparent;
-    color: var(--text-muted, #6b6b70);
+    color: var(--text-muted);
     padding: 4px 6px;
     font-size: 11px;
     border-radius: 4px;
@@ -447,11 +447,11 @@
     justify-content: center;
     gap: 4px;
   }
-  .ds-nav-btn.on { background: var(--bg, #fff); color: var(--text, #1c1c1e); font-weight: 500; }
+  .ds-nav-btn.on { background: var(--bg); color: var(--text); font-weight: 500; }
   .ds-nav-count {
     font-size: 9px;
-    background: var(--accent, #c9a45c);
-    color: #fff;
+    background: var(--accent);
+    color: var(--text-inverse);
     padding: 0 4px;
     border-radius: 6px;
   }
@@ -461,7 +461,7 @@
     margin: 0 0 10px 0;
     font-size: 12px;
     font-weight: 600;
-    color: var(--text, #1c1c1e);
+    color: var(--text);
   }
   .ds-section p { font-size: 12px; line-height: 1.5; }
   .ds-section code {
@@ -478,14 +478,14 @@
     gap: 6px;
   }
   .ds-swatch {
-    border: 1px solid var(--border, #e3e3e6);
+    border: 1px solid var(--border);
     border-radius: 4px;
     overflow: hidden;
-    background: var(--bg, #fff);
+    background: var(--bg);
   }
   .ds-swatch-color {
     height: 32px;
-    border-bottom: 1px solid var(--border, #e3e3e6);
+    border-bottom: 1px solid var(--border);
   }
   .ds-swatch-label {
     padding: 4px 6px;
@@ -501,12 +501,12 @@
     font-size: 12px;
   }
   .ds-voice-row > strong { display: block; margin-bottom: 4px; }
-  .ds-voice-desc { font-style: italic; color: var(--text-muted, #6b6b70); margin: 0 0 10px 0; }
+  .ds-voice-desc { font-style: italic; color: var(--text-muted); margin: 0 0 10px 0; }
   .ds-chips { display: flex; flex-wrap: wrap; gap: 3px; }
   .ds-chip {
     display: inline-block;
-    background: var(--bg, #fff);
-    border: 1px solid var(--border, #d0d0d4);
+    background: var(--bg);
+    border: 1px solid var(--border);
     padding: 2px 7px;
     border-radius: 8px;
     font-size: 10px;
@@ -514,7 +514,7 @@
   .ds-chip-bad {
     background: rgba(201, 80, 74, 0.1);
     border-color: rgba(201, 80, 74, 0.4);
-    color: #6b1a1a;
+    color: var(--danger);
   }
   .ds-list { padding-left: 18px; margin: 4px 0; font-size: 12px; }
 
@@ -525,10 +525,10 @@
   }
   .ds-image {
     margin: 0;
-    border: 1px solid var(--border, #e3e3e6);
+    border: 1px solid var(--border);
     border-radius: 4px;
     overflow: hidden;
-    background: var(--bg, #fff);
+    background: var(--bg);
   }
   .ds-image img {
     width: 100%;
@@ -545,11 +545,11 @@
   .ds-image figcaption code { font-size: 9px; }
 
   .ds-copy-card {
-    border: 1px solid var(--border, #e3e3e6);
+    border: 1px solid var(--border);
     border-radius: 6px;
     padding: 8px 10px;
     margin-bottom: 8px;
-    background: var(--bg, #fff);
+    background: var(--bg);
   }
   .ds-copy-head {
     display: flex;
@@ -572,7 +572,7 @@
   .ds-copy-variants summary {
     cursor: pointer;
     font-size: 10px;
-    color: var(--text-muted, #6b6b70);
+    color: var(--text-muted);
     margin-top: 6px;
   }
   .ds-copy-variants ul {
@@ -587,13 +587,13 @@
     gap: 6px;
     padding: 3px 0;
     font-size: 11px;
-    border-top: 1px solid var(--border, #e3e3e6);
+    border-top: 1px solid var(--border);
   }
   .ds-copy-rationale {
     font-size: 10px;
     margin: 6px 0 0 0;
     padding-top: 6px;
-    border-top: 1px dashed var(--border, #e3e3e6);
+    border-top: 1px dashed var(--border);
   }
   .ds-btn-mini {
     border: none;
@@ -609,7 +609,7 @@
   .ds-footnote code { font-size: 9px; }
 
   .ds-empty {
-    color: var(--text-muted, #6b6b70);
+    color: var(--text-muted);
     font-size: 12px;
     text-align: center;
     padding: 18px 12px;
@@ -617,14 +617,14 @@
   .ds-error {
     margin: 8px 12px;
     padding: 6px 8px;
-    background: rgba(176, 48, 48, 0.08);
-    border: 1px solid #b03030;
+    background: var(--danger-soft);
+    border: 1px solid var(--danger);
     border-radius: 4px;
     font-size: 12px;
-    color: #6b1a1a;
+    color: var(--danger);
   }
   .ds-error-mini {
-    color: #6b1a1a;
+    color: var(--danger);
     font-size: 11px;
     margin: 4px 0;
   }
@@ -634,18 +634,19 @@
     width: 100%;
     box-sizing: border-box;
     font-family: ui-monospace, monospace;
-    font-size: 11px;
-    padding: 6px;
-    border: 1px solid var(--border, #d0d0d4);
-    border-radius: 4px;
-    background: var(--bg, #fff);
-    color: var(--text, #1c1c1e);
+  }
+  .ds-banned-item {
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--bg);
+    color: var(--danger);
   }
   .ds-row { display: flex; gap: 6px; margin-top: 6px; }
   .ds-btn {
-    border: 1px solid var(--border, #d0d0d4);
-    background: var(--bg, #fff);
-    color: var(--text, #1c1c1e);
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
     padding: 4px 10px;
     border-radius: 4px;
     font-size: 11px;
@@ -653,22 +654,10 @@
   }
   .ds-btn:hover:not(:disabled) { background: rgba(0,0,0,0.04); }
   .ds-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .ds-btn-primary { background: var(--accent, #c9a45c); color: #fff; border-color: var(--accent, #c9a45c); }
-  .muted { color: var(--text-muted, #6b6b70); }
+  .ds-btn-primary { background: var(--accent); color: var(--text-inverse); border-color: var(--accent); }
+  .muted { color: var(--text-muted); }
 
 
-  /* ---- DesignStudio light theme ---- */
-  :global(html:not(.theme-dark)) .ds-header { background: rgba(242,238,232,0.9); border-bottom-color: rgba(176,160,140,0.25); }
-  :global(html:not(.theme-dark)) .ds-title { color: #1a1c20; }
-  :global(html:not(.theme-dark)) .ds-toolbar { background: rgba(242,238,232,0.9); border-bottom-color: rgba(176,160,140,0.2); }
-  :global(html:not(.theme-dark)) .ds-btn { background: rgba(255,255,255,0.7); border-color: rgba(176,160,140,0.3); color: #5a6068; }
-  :global(html:not(.theme-dark)) .ds-btn:hover { background: rgba(176,120,120,0.08); border-color: rgba(176,120,120,0.4); color: #8a4848; }
-  :global(html:not(.theme-dark)) .ds-btn.active { background: rgba(176,120,120,0.85); border-color: transparent; color: #fff; }
-  :global(html:not(.theme-dark)) .ds-viewport { background: #e8e4dc; }
-  :global(html:not(.theme-dark)) .ds-sidebar { background: rgba(242,238,232,0.95); border-left-color: rgba(176,160,140,0.2); }
-  :global(html:not(.theme-dark)) .ds-panel { background: rgba(242,238,232,0.9); border-color: rgba(176,160,140,0.25); }
-  :global(html:not(.theme-dark)) .ds-panel-title { color: #1a1c20; }
-  :global(html:not(.theme-dark)) .ds-input { background: rgba(255,255,255,0.8); border-color: rgba(176,160,140,0.3); color: #1a1c20; }
-  :global(html:not(.theme-dark)) .ds-empty { color: #8a8f97; }
+
 
 </style>

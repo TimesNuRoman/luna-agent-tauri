@@ -7,8 +7,6 @@
 
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Emitter};
-
 /// A target that receives streaming chat output.
 ///
 /// Sinks must be `Send` so they can live behind `Box<dyn ChatSink>` and
@@ -19,72 +17,11 @@ pub trait ChatSink: Send {
     fn on_thinking(&mut self, text: &str);
     /// Reserved for future tool-loop integration. The current
     /// `chat_text_stream_core` never calls this.
-    #[allow(dead_code)]
     fn on_tool_use(&mut self, _name: &str, _args: &serde_json::Value) {}
     /// Reserved for future tool-loop integration.
-    #[allow(dead_code)]
     fn on_tool_result(&mut self, _name: &str, _ok: bool, _error: Option<&str>) {}
     fn on_done(&mut self, full: &str);
     fn on_error(&mut self, msg: &str);
-}
-
-/// A sink that mirrors the existing Tauri events (`ai_chunk`, `ai_thinking`,
-/// `ai_tool_use`, `ai_tool_result`, `ai_done`). Used by the UI's
-/// `minimax_chat_stream` / `ai_chat_stream` commands and any future
-/// text-only Tauri command.
-///
-/// The `request_id` field is included in every event so the Svelte chat
-/// can disambiguate concurrent streams (in practice only one is active at
-/// a time, but the id keeps the event contract stable).
-#[allow(dead_code)]
-pub struct TauriEventSink {
-    pub app: AppHandle,
-    pub request_id: String,
-}
-
-impl TauriEventSink {
-    #[allow(dead_code)]
-    pub fn new(app: AppHandle) -> Self {
-        Self {
-            app,
-            request_id: String::new(),
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn with_request_id(app: AppHandle, request_id: String) -> Self {
-        Self { app, request_id }
-    }
-}
-
-impl ChatSink for TauriEventSink {
-    fn on_chunk(&mut self, text: &str) {
-        let _ = self.app.emit("ai_chunk", text.to_string());
-    }
-
-    fn on_thinking(&mut self, text: &str) {
-        let _ = self.app.emit("ai_thinking", text.to_string());
-    }
-
-    fn on_tool_use(&mut self, name: &str, args: &serde_json::Value) {
-        let _ = self.app.emit("ai_tool_use", serde_json::json!({
-            "id": self.request_id, "name": name, "args": args,
-        }));
-    }
-
-    fn on_tool_result(&mut self, name: &str, ok: bool, error: Option<&str>) {
-        let _ = self.app.emit("ai_tool_result", serde_json::json!({
-            "id": self.request_id, "name": name, "ok": ok, "error": error,
-        }));
-    }
-
-    fn on_done(&mut self, _full: &str) {
-        let _ = self.app.emit("ai_done", true);
-    }
-
-    fn on_error(&mut self, msg: &str) {
-        let _ = self.app.emit("ai_error", msg.to_string());
-    }
 }
 
 /// Throttling for "edit one Telegram message in place" UX.
@@ -109,16 +46,6 @@ impl EditThrottler {
             bytes_since_last: 0,
             time_threshold: Duration::from_millis(1200),
             byte_threshold: 200,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn with_thresholds(time: Duration, bytes: usize) -> Self {
-        Self {
-            last_edit: None,
-            bytes_since_last: 0,
-            time_threshold: time,
-            byte_threshold: bytes,
         }
     }
 
@@ -327,9 +254,11 @@ mod tests {
 
     #[test]
     fn throttler_byte_threshold() {
-        let mut t = EditThrottler::with_thresholds(Duration::from_secs(60), 50);
+        // Default thresholds are 1.2s / 200B; force time threshold high by
+        // sleeping less than that and using 50 bytes (sub-byte of 200).
+        let mut t = EditThrottler::new();
         t.note_edited(0);
-        t.add_bytes(49);
+        t.add_bytes(199);
         assert!(!t.should_edit());
         t.add_bytes(1);
         assert!(t.should_edit());
@@ -337,9 +266,10 @@ mod tests {
 
     #[test]
     fn throttler_time_threshold() {
-        let mut t = EditThrottler::with_thresholds(Duration::from_millis(1), 1_000_000);
+        // Default time threshold is 1.2s; sleep past it to force time path.
+        let mut t = EditThrottler::new();
         t.note_edited(0);
-        std::thread::sleep(Duration::from_millis(5));
+        std::thread::sleep(Duration::from_millis(1300));
         assert!(t.should_edit());
     }
 }

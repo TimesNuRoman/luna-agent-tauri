@@ -7,13 +7,14 @@
 //!   <task-uuid>/
 //!     meta.json                    # full Task
 //!     steps.jsonl                  # NDJSON of TaskStep
+//!     checkpoint.json              # crash-recovery checkpoint (Phase M3+)
 //!     result.md                    # final assistant text
 //! ```
 //!
 //! All writes are atomic (tmp + rename). NDJSON is append-only with a
 //! per-task `BufWriter` to avoid re-opening the file on every step.
 
-use super::task::{Task, TaskResult, TaskStatus, TaskStep, TaskSummary};
+use super::task::{CaseResult, CaseSeverity, CaseStatus, Task, TaskCost, TaskResult, TaskStatus, TaskStep, TaskSummary};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
@@ -42,6 +43,26 @@ impl From<StoreError> for String {
 }
 
 pub type StoreResult<T> = Result<T, StoreError>;
+
+/// Crash-recovery checkpoint written after each tool result so the runner
+/// can resume from the last successful step on restart. Persisted to
+/// `<task_dir>/checkpoint.json`.
+///
+/// Written atomically (tmp + rename). Read by `recover_pending` on startup.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Checkpoint {
+    /// Snapshot of the task's current status.
+    pub status: TaskStatus,
+    /// Number of supervisor steps completed so far.
+    pub steps_completed: u32,
+    /// Last heartbeat timestamp.
+    pub last_active_at: chrono::DateTime<chrono::Utc>,
+    /// Accumulated cost totals at this checkpoint.
+    pub cost: TaskCost,
+    /// Optional error string from a failed step (None if running OK).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
 
 /// On-disk store. Cheap to clone (all heavy state is behind `Arc`).
 #[derive(Clone)]
@@ -268,6 +289,43 @@ impl TaskStore {
     }
 
     // -----------------------------------------------------------------
+    // Crash-recovery checkpoint (Phase M3+)
+    // -----------------------------------------------------------------
+
+    /// Persist a checkpoint to `<task_dir>/checkpoint.json`. Called by
+    /// `ProgressEmitter` after every tool result so the runner can
+    /// resume from the last saved step on crash.
+    ///
+    /// Writes atomically (tmp + rename).
+    pub fn save_checkpoint(&self, task: &Task) -> StoreResult<()> {
+        let checkpoint = Checkpoint {
+            status: task.status,
+            steps_completed: task.steps_completed,
+            last_active_at: task.last_active_at,
+            cost: task.cost.clone(),
+            error: task.error.clone(),
+        };
+        let path = self.task_dir(&task.id).join("checkpoint.json");
+        let tmp = path.with_extension("json.tmp");
+        let data = serde_json::to_string_pretty(&checkpoint)?;
+        fs::write(&tmp, data)?;
+        fs::rename(&tmp, &path)?;
+        Ok(())
+    }
+
+    /// Read the checkpoint file for a task. Returns `None` if no
+    /// checkpoint exists (first run, or task was already completed).
+    pub fn read_checkpoint(&self, id: &str) -> StoreResult<Option<Checkpoint>> {
+        let path = self.task_dir(id).join("checkpoint.json");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let data = fs::read_to_string(&path)?;
+        let ck: Checkpoint = serde_json::from_str(&data)?;
+        Ok(Some(ck))
+    }
+
+    // -----------------------------------------------------------------
     // Auto-cleanup
     // -----------------------------------------------------------------
 
@@ -295,7 +353,8 @@ impl TaskStore {
     // Internal helpers
     // -----------------------------------------------------------------
 
-    fn task_dir(&self, id: &str) -> PathBuf {
+    /// Returns the directory path for a task (used by heartbeat, checkpoint, etc.)
+    pub fn task_dir(&self, id: &str) -> PathBuf {
         self.inner.root.join(id)
     }
 
@@ -578,6 +637,14 @@ mod tests {
                 ..Default::default()
             },
             persona_payload: None,
+            cases: Vec::new(),
+            task_id: "t1".into(),
+            root_cause: None,
+            findings: Vec::new(),
+            severity: CaseSeverity::default(),
+            status: CaseStatus::Closed,
+            next_steps: Vec::new(),
+            duration_ms: 0,
         };
         store.write_result("t1", &r).unwrap();
         let read = store.read_result("t1").unwrap().unwrap();

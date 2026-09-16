@@ -152,6 +152,38 @@ pub fn supervisor_tools() -> Vec<MinimaxTool> {
                 }),
             },
         },
+        // Phase 3: File creation and editing
+        MinimaxTool {
+            kind: "function".into(),
+            function: MinimaxToolFunction {
+                name: "create_file".into(),
+                description: "Create a new file with the given content. Creates parent directories if needed.".into(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "File path (workspace-relative or absolute)." },
+                        "content": { "type": "string", "description": "File content to write." }
+                    },
+                    "required": ["path", "content"]
+                }),
+            },
+        },
+        MinimaxTool {
+            kind: "function".into(),
+            function: MinimaxToolFunction {
+                name: "edit_file".into(),
+                description: "Apply a targeted edit to an existing file. Use this for small to medium changes.".into(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "File path (workspace-relative or absolute)." },
+                        "old_string": { "type": "string", "description": "Unique string to find in the file (must match exactly)." },
+                        "new_string": { "type": "string", "description": "Replacement string." }
+                    },
+                    "required": ["path", "old_string", "new_string"]
+                }),
+            },
+        },
     ]
     .into_iter()
     .chain(git_tools::tool_definitions())
@@ -281,7 +313,9 @@ pub async fn execute_tool(
         "vision_grounding" => tool_vision_grounding(args).await,
         "reflect_on_trace" => {
             tool_reflect_on_trace(args, trace_buffer).await
-        },
+        }
+        "create_file" => tool_create_file(args, &source_root).await,
+        "edit_file" => tool_edit_file(args, &source_root).await,
         n if git_tools::is_git_tool(n) => git_tools::execute(n, args, &source_root).await,
         _ => ToolOutcome {
             content: format!("error: unknown tool '{name}'"),
@@ -569,7 +603,112 @@ fn generate_simple_reflection(trace: &Trace, _focus: &str) -> String {
 }
 
 // =====================================================================
-// Supervisor loop
+// Phase 3: File creation and editing tools
+// =====================================================================
+
+async fn tool_create_file(args: &serde_json::Value, source_root: &std::path::Path) -> ToolOutcome {
+    let path = match args.get("path").and_then(|v| v.as_str()) {
+        Some(p) => p,
+        None => return ToolOutcome { content: "error: 'path' is required".into(), is_error: true },
+    };
+    let content = match args.get("content").and_then(|v| v.as_str()) {
+        Some(c) => c,
+        None => return ToolOutcome { content: "error: 'content' is required".into(), is_error: true },
+    };
+
+    let abs = if std::path::Path::new(path).is_absolute() {
+        std::path::PathBuf::from(path)
+    } else {
+        source_root.join(path)
+    };
+
+    // Create parent directories if they don't exist
+    if let Some(parent) = abs.parent() {
+        if !parent.exists() {
+            match std::fs::create_dir_all(parent) {
+                Ok(_) => {}
+                Err(e) => {
+                    return ToolOutcome {
+                        content: format!("error: failed to create parent directory: {}", e),
+                        is_error: true,
+                    };
+                }
+            }
+        }
+    }
+
+    match std::fs::write(&abs, content) {
+        Ok(_) => ToolOutcome {
+            content: format!("ok: created file {} ({} bytes)", abs.display(), content.len()),
+            is_error: false,
+        },
+        Err(e) => ToolOutcome {
+            content: format!("error: failed to create file: {}", e),
+            is_error: true,
+        },
+    }
+}
+
+async fn tool_edit_file(args: &serde_json::Value, source_root: &std::path::Path) -> ToolOutcome {
+    let path = match args.get("path").and_then(|v| v.as_str()) {
+        Some(p) => p,
+        None => return ToolOutcome { content: "error: 'path' is required".into(), is_error: true },
+    };
+    let old_string = match args.get("old_string").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => return ToolOutcome { content: "error: 'old_string' is required".into(), is_error: true },
+    };
+    let new_string = match args.get("new_string").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => return ToolOutcome { content: "error: 'new_string' is required".into(), is_error: true },
+    };
+
+    let abs = if std::path::Path::new(path).is_absolute() {
+        std::path::PathBuf::from(path)
+    } else {
+        source_root.join(path)
+    };
+
+    let current = match std::fs::read_to_string(&abs) {
+        Ok(c) => c,
+        Err(e) => {
+            return ToolOutcome {
+                content: format!("error: failed to read file: {}", e),
+                is_error: true,
+            };
+        }
+    };
+
+    if !current.contains(old_string) {
+        return ToolOutcome {
+            content: format!(
+                "error: old_string not found in file. Make sure to use the exact text including whitespace and newlines."
+            ),
+            is_error: true,
+        };
+    }
+
+    let new_content = current.replace(old_string, new_string);
+
+    match std::fs::write(&abs, &new_content) {
+        Ok(_) => ToolOutcome {
+            content: format!(
+                "ok: edited file {} ({} → {} bytes)",
+                abs.display(),
+                current.len(),
+                new_content.len()
+            ),
+            is_error: false,
+        },
+        Err(e) => ToolOutcome {
+            content: format!("error: failed to write file: {}", e),
+            is_error: true,
+        },
+    }
+}
+
+// =====================================================================
+// Supervisor run loop
 // =====================================================================
 
 /// Run the supervisor loop. On success returns the final assistant
@@ -756,6 +895,8 @@ pub async fn run_loop(
                     content: truncate(&result_content, 8_000),
                     is_error: sub_result.is_error,
                 });
+                // Crash-recovery checkpoint: persist state after sub-agent result.
+                progress.checkpoint_after_step(task);
                 messages.push(MinimaxMessage::Tool {
                     tool_call_id: call.id.clone(),
                     content: truncate(&result_content, 8_000),
@@ -786,6 +927,8 @@ pub async fn run_loop(
                 content: truncate(&outcome.content, 8_000),
                 is_error: outcome.is_error,
             });
+            // Crash-recovery checkpoint: persist state after every tool result.
+            progress.checkpoint_after_step(task);
             messages.push(MinimaxMessage::Tool {
                 tool_call_id: call.id.clone(),
                 content: truncate(&outcome.content, 8_000),

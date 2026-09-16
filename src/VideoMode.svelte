@@ -422,7 +422,7 @@
     flex-direction: column;
     gap: 14px;
     padding: 16px 20px;
-    color: #e6e8eb;
+    color: var(--text);
     max-width: 1000px;
     margin: 0 auto;
   }
@@ -442,9 +442,9 @@
   }
 
   .key-banner {
-    background: #2a2018;
-    border: 1px solid #f5b56b;
-    color: #f5b56b;
+    background: var(--warn-soft);
+    border: 1px solid var(--warn);
+    color: var(--warn);
     border-radius: 6px;
     padding: 8px 12px;
     font-size: 13px;
@@ -453,11 +453,11 @@
     gap: 10px;
     flex-wrap: wrap;
   }
-  .key-banner strong { color: #ffce8a; }
+  .key-banner strong { color: var(--accent); }
   .key-banner button { margin-left: auto; }
   .status {
     font-size: 13px;
-    color: #b6bcc7;
+    color: var(--text-muted);
     display: flex;
     align-items: center;
     gap: 8px;
@@ -468,13 +468,13 @@
     border-radius: 50%;
     display: inline-block;
   }
-  .dot.live { background: #c34c4c; box-shadow: 0 0 8px #c34c4c; }
+  .dot.live { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
   .dot.idle { background: #4a505c; }
 
   .preview {
     position: relative;
     background: #0d0f12;
-    border: 1px solid #2c313a;
+    border: 1px solid var(--border);
     border-radius: 8px;
     overflow: hidden;
     min-height: 240px;
@@ -482,9 +482,9 @@
     align-items: center;
     justify-content: center;
   }
-  .preview.live { border-color: #c34c4c; box-shadow: 0 0 0 1px #c34c4c inset; }
+  .preview.live { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger) inset; }
   .preview img { max-width: 100%; max-height: 480px; object-fit: contain; }
-  .placeholder { color: #6c7280; font-size: 14px; }
+  .placeholder { color: var(--text-muted); font-size: 14px; }
 
   .controls {
     display: flex;
@@ -493,7 +493,7 @@
     background: #181b21;
     padding: 12px 14px;
     border-radius: 8px;
-    border: 1px solid #2c313a;
+    border: 1px solid var(--border);
   }
   .row {
     display: flex;
@@ -512,87 +512,87 @@
     align-items: center;
     gap: 8px;
     flex: 1 1 auto;
-    color: #b6bcc7;
+    color: var(--text-muted);
     font-size: 13px;
   }
   .row.autoinvoke .toggle input[type="checkbox"] {
     width: 16px;
     height: 16px;
-    accent-color: #c34c4c;
+    accent-color: var(--danger);
     cursor: pointer;
   }
   .row.autoinvoke .toggle small {
-    color: #6c7280;
+    color: var(--text-muted);
     font-size: 11px;
     margin-left: 6px;
   }
   .row.autoinvoke .badge {
     background: #181b21;
-    border: 1px solid #2c313a;
+    border: 1px solid var(--border);
     border-radius: 6px;
     padding: 4px 10px;
     font-size: 12px;
-    color: #b6bcc7;
+    color: var(--text-muted);
   }
   .row.autoinvoke .badge strong {
-    color: #ffce8a;
+    color: var(--accent);
     margin-left: 4px;
   }
   label {
     display: flex;
     flex-direction: column;
     font-size: 12px;
-    color: #b6bcc7;
+    color: var(--text-muted);
     gap: 4px;
   }
   label.grow { flex: 1; }
   input, select {
     background: #0f1217;
-    color: #e6e8eb;
-    border: 1px solid #2c313a;
+    color: var(--text);
+    border: 1px solid var(--border);
     border-radius: 4px;
     padding: 6px 8px;
     font-size: 13px;
     font-family: inherit;
   }
-  input:focus, select:focus { outline: 1px solid #4a78c8; }
+  input:focus, select:focus { outline: 1px solid var(--info-soft); }
 
   .actions { align-items: center; }
-  button {
+  .vm-btn {
     padding: 7px 14px;
     border-radius: 6px;
-    border: 1px solid transparent;
+    border: 1px solid var(--border);
     cursor: pointer;
     font-size: 13px;
-    background: #2c313a;
-    color: #e6e8eb;
+    background: var(--bg-elevated);
+    color: var(--text);
   }
-  button:hover:not(:disabled) { background: #353c47; }
+  .vm-btn:hover:not(:disabled) { background: var(--bg-hover); }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   button.primary {
-    background: #c34c4c;
+    background: var(--danger);
     color: white;
-    border-color: #c34c4c;
+    border-color: var(--danger);
   }
-  button.primary:hover:not(:disabled) { background: #d75a5a; }
+  button.primary:hover:not(:disabled) { background: var(--danger-strong, #d75a5a); }
   button.danger {
-    background: #8a3a3a;
-    color: white;
-    border-color: #8a3a3a;
+    background: var(--danger-soft);
+    color: var(--danger);
+    border-color: var(--danger);
   }
-  button.danger:hover:not(:disabled) { background: #a04848; }
+  button.danger:hover:not(:disabled) { background: var(--danger); }
   button.ghost {
     background: transparent;
-    border-color: #3a414b;
-    color: #cfd3da;
+    border-color: var(--border);
+    color: var(--text-muted);
   }
-  button.ghost:hover:not(:disabled) { background: #252932; }
+  button.ghost:hover:not(:disabled) { background: var(--bg-hover); }
   button.small { padding: 2px 8px; font-size: 16px; line-height: 1; }
 
-  .error { color: #f09090; font-size: 13px; }
+  .error { color: var(--danger-soft); font-size: 13px; }
   .error-banner {
-    background: #2a1818;
-    border: 1px solid #8a3a3a;
+    background: var(--danger-soft);
+    border: 1px solid var(--danger);
     border-radius: 6px;
     padding: 8px 12px;
     font-size: 13px;
@@ -600,19 +600,19 @@
     align-items: center;
     gap: 10px;
   }
-  .error-banner strong { color: #f5a5a5; }
+  .error-banner strong { color: var(--danger); }
   .error-banner button { margin-left: auto; }
-  .warn { color: #f5b56b; }
+  .warn { color: var(--warn-soft); }
   .warn-banner {
-    background: #2a2018;
-    border: 1px solid #f5b56b;
-    color: #f5b56b;
+    background: var(--warn-soft);
+    border: 1px solid var(--warn);
+    color: var(--warn);
     border-radius: 6px;
     padding: 8px 12px;
     font-size: 13px;
   }
 
-  .hints h2 { font-size: 14px; margin: 0 0 6px 0; color: #b6bcc7; }
+  .hints h2 { font-size: 14px; margin: 0 0 6px 0; color: var(--text-muted); }
   .hints ul {
     list-style: none;
     padding: 0;
@@ -625,37 +625,24 @@
     display: flex;
     gap: 10px;
     align-items: baseline;
-    background: #181b21;
-    border: 1px solid #2c313a;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
     border-radius: 6px;
     padding: 8px 12px;
     font-size: 13px;
   }
-  .hint.kind-error { border-color: #8a3a3a; background: #1f1414; }
+  .hint.kind-error { border-color: var(--danger); background: var(--danger-soft); }
   .hint.kind-noop, .hint.kind-no_goal { opacity: 0.6; }
   .hint .badge {
     font-family: ui-monospace, monospace;
-    color: #6c7280;
+    color: var(--text-muted);
     min-width: 18px;
   }
   .hint .text { flex: 1; }
-  .hint .meta { color: #6c7280; font-size: 11px; }
-  .muted { color: #6c7280; font-size: 13px; margin: 4px 0; }
+  .hint .meta { color: var(--text-muted); font-size: 11px; }
+  .muted { color: var(--text-muted); font-size: 13px; margin: 4px 0; }
 
 
-  /* ---- VideoMode light theme ---- */
-  :global(html:not(.theme-dark)) .vm-header { background: rgba(242,238,232,0.9); border-bottom-color: rgba(176,160,140,0.25); }
-  :global(html:not(.theme-dark)) .vm-title { color: #1a1c20; }
-  :global(html:not(.theme-dark)) .vm-subtitle { color: #5a6068; }
-  :global(html:not(.theme-dark)) .vm-preview { background: rgba(236,232,224,0.8); border-color: rgba(176,160,140,0.25); }
-  :global(html:not(.theme-dark)) .vm-canvas { background: #e8e4dc; }
-  :global(html:not(.theme-dark)) .vm-btn { background: rgba(255,255,255,0.7); border-color: rgba(176,160,140,0.3); color: #5a6068; }
-  :global(html:not(.theme-dark)) .vm-btn:hover { background: rgba(176,120,120,0.08); border-color: rgba(176,120,120,0.4); color: #8a4848; }
-  :global(html:not(.theme-dark)) .vm-btn.start { background: rgba(176,120,120,0.85); border-color: transparent; color: #fff; }
-  :global(html:not(.theme-dark)) .vm-btn.stop { background: rgba(216,122,122,0.85); border-color: transparent; color: #fff; }
-  :global(html:not(.theme-dark)) .vm-status { color: #5a6068; }
-  :global(html:not(.theme-dark)) .vm-hint { background: rgba(242,238,232,0.9); border-color: rgba(176,160,140,0.25); }
-  :global(html:not(.theme-dark)) .vm-hint-text { color: #1a1c20; }
-  :global(html:not(.theme-dark)) .vm-monitor-select { background: rgba(255,255,255,0.8); border-color: rgba(176,160,140,0.3); color: #1a1c20; }
+
 
 </style>

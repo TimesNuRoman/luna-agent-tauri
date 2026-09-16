@@ -11,7 +11,18 @@
   function handleDecline() {
     onDecline();
   }
+
+  // F17: Esc is promised in the consent copy ("Нажмите Esc или кнопку Stop").
+  // Bind it on the window so it works regardless of which button has focus.
+  function onWindowKey(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      handleDecline();
+    }
+  }
 </script>
+
+<svelte:window on:keydown={onWindowKey} />
 
 <div class="overlay" role="dialog" aria-modal="true" aria-labelledby="consent-title">
   <div class="modal">
@@ -51,13 +62,13 @@
     z-index: 100;
   }
   .modal {
-    background: #1c1f26;
-    color: #e6e8eb;
+    background: var(--bg-elevated);
+    color: var(--text);
     border-radius: 12px;
     padding: 24px 28px;
     max-width: 540px;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-    border: 1px solid #2c313a;
+    border: 1px solid var(--border);
   }
   h2 {
     margin: 0 0 12px 0;
@@ -67,18 +78,18 @@
   ul { margin: 8px 0 8px 18px; padding: 0; line-height: 1.45; }
   li { margin: 4px 0; }
   kbd {
-    background: #2c313a;
-    border: 1px solid #3a414b;
+    background: var(--border);
+    border: 1px solid var(--border-strong);
     border-radius: 4px;
     padding: 1px 6px;
     font-family: ui-monospace, monospace;
     font-size: 12px;
   }
   .warn {
-    color: #f5b56b;
+    color: var(--warn);
     font-size: 13px;
-    background: #2a2018;
-    border-left: 3px solid #f5b56b;
+    background: var(--warn-soft);
+    border-left: 3px solid var(--warn);
     padding: 8px 10px;
     border-radius: 4px;
   }
@@ -96,28 +107,20 @@
     font-size: 14px;
   }
   button.primary {
-    background: #c34c4c;
-    color: white;
-    border-color: #c34c4c;
+    background: var(--danger);
+    color: var(--text-inverse);
+    border-color: var(--danger);
   }
   button.primary:hover {
-    background: #d75a5a;
+    background: var(--danger-strong);
   }
   button.ghost {
     background: transparent;
-    color: #cfd3da;
-    border-color: #3a414b;
+    color: var(--text);
+    border-color: var(--border);
   }
   button.ghost:hover {
-    background: #252932;
+    background: var(--bg-hover);
   }
-
-
-  /* ---- ConsentModal light theme ---- */
-  :global(html:not(.theme-dark)) .consent-modal { background: rgba(248,244,238,0.98); border-color: rgba(176,160,140,0.3); }
-  :global(html:not(.theme-dark)) .consent-title { color: #1a1c20; }
-  :global(html:not(.theme-dark)) .consent-body { color: #5a6068; }
-  :global(html:not(.theme-dark)) .consent-btn { background: rgba(176,120,120,0.85); border-color: transparent; color: #fff; }
-  :global(html:not(.theme-dark)) .consent-btn.secondary { background: rgba(255,255,255,0.7); border-color: rgba(176,160,140,0.3); color: #5a6068; }
 
 </style>

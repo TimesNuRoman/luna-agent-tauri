@@ -172,6 +172,81 @@ pub fn persona_tool_definitions() -> Vec<MinimaxTool> {
             }),
         ),
         mtool(
+            "design_apply",
+            "Apply a design artifact to the workspace by copying the generated files to their target paths.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "artifact_id": { "type": "string" }
+                },
+                "required": ["artifact_id"]
+            }),
+        ),
+        // ---- Memori (M2) ----
+        mtool(
+            "memori_recall",
+            "Query structured memory via Memori API. Returns facts matching the query with signal/source filters.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string" },
+                    "signal": { "type": "string", "enum": ["system", "user", "derived"] },
+                    "source": { "type": "string", "enum": ["fact", "constraint", "decision"] },
+                    "date_start": { "type": "string", "description": "ISO 8601 date" },
+                    "date_end": { "type": "string", "description": "ISO 8601 date" },
+                    "session_id": { "type": "string" }
+                },
+                "required": []
+            }),
+        ),
+        mtool(
+            "memori_recall_summary",
+            "Get a summary/daily brief from Memori for a date range.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "date_start": { "type": "string", "description": "ISO 8601 date" },
+                    "date_end": { "type": "string", "description": "ISO 8601 date" }
+                },
+                "required": []
+            }),
+        ),
+        mtool(
+            "memori_compaction",
+            "Get structured continuation brief from Memori for a session.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "session_id": { "type": "string" }
+                },
+                "required": []
+            }),
+        ),
+        mtool(
+            "memori_capture_turn",
+            "Capture a conversation turn (user + assistant messages) into Memori memory.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "user_content": { "type": "string" },
+                    "assistant_content": { "type": "string" }
+                },
+                "required": ["user_content", "assistant_content"]
+            }),
+        ),
+        mtool(
+            "memori_feedback",
+            "Report quality feedback to Memori for model improvement.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "quality": { "type": "string", "enum": ["good", "bad", "neutral"] },
+                    "details": { "type": "string" }
+                },
+                "required": ["quality", "details"]
+            }),
+        ),
+        mtool(
             "memory_list_graph_entities",
             "List all entities in the knowledge graph. Returns Vec<Entity{name, kind, importance}>.",
             json!({ "type": "object", "properties": {}, "required": [] }),
@@ -336,6 +411,12 @@ pub const PERSONA_TOOL_NAMES: &[&str] = &[
     "design_copy_apply",
     "design_component_propose",
     "design_apply",
+    // Memori tools (M2)
+    "memori_recall",
+    "memori_recall_summary",
+    "memori_compaction",
+    "memori_capture_turn",
+    "memori_feedback",
 ];
 
 /// True if `name` is a persona tool. The supervisor uses this to
@@ -385,6 +466,12 @@ pub async fn execute_persona_tool(
         "get_user_interests" => tool_get_user_interests(ctx),
         // ---- Persona finalization ----
         "produce_fusion_payload" => tool_produce_fusion_payload(args, payload_sink),
+        // ---- Memori (M2) ----
+        "memori_recall" => tool_memori_recall(args, ctx).await,
+        "memori_recall_summary" => tool_memori_recall_summary(args, ctx).await,
+        "memori_compaction" => tool_memori_compaction(args, ctx).await,
+        "memori_capture_turn" => tool_memori_capture_turn(args, ctx, task).await,
+        "memori_feedback" => tool_memori_feedback(args, ctx, task).await,
         _ => ToolOutcome {
             content: format!("error: unknown persona tool '{name}'"),
             is_error: true,
@@ -1081,5 +1168,94 @@ mod tests {
         let v = sink.take().unwrap();
         let items = v["fusion_news"].as_array().unwrap();
         assert_eq!(items.len(), 2);
+    }
+}
+
+// =====================================================================
+// Memori tools (M2) — structured memory via Memori API
+// =====================================================================
+
+fn get_memori_client() -> Result<crate::services::memori::MemoriClient, super::supervisor::ToolOutcome> {
+    // MemoriClient requires api_key and entity_id which must be configured
+    // For persona tools, we return an error if not configured
+    Err(super::supervisor::ToolOutcome {
+        content: "error: Memori not configured (missing API key or entity ID)".into(),
+        is_error: true,
+    })
+}
+
+async fn tool_memori_recall(args: &serde_json::Value, _ctx: &PersonaToolContext) -> super::supervisor::ToolOutcome {
+    use super::supervisor::ToolOutcome;
+    let client = match get_memori_client() {
+        Ok(c) => c,
+        Err(e) => return e,
+    };
+    let params = crate::services::memori::RecallParams {
+        query: args.get("query").and_then(|v| v.as_str()).map(String::from),
+        signal: args.get("signal").and_then(|v| v.as_str()).map(String::from),
+        source: args.get("source").and_then(|v| v.as_str()).map(String::from),
+        date_start: args.get("date_start").and_then(|v| v.as_str()).map(String::from),
+        date_end: args.get("date_end").and_then(|v| v.as_str()).map(String::from),
+        project_id: None,
+        session_id: args.get("session_id").and_then(|v| v.as_str()).map(String::from),
+    };
+    match client.recall(params).await {
+        Ok(facts) => ToolOutcome { content: serde_json::to_string_pretty(&facts).unwrap_or_default(), is_error: false },
+        Err(e) => ToolOutcome { content: format!("memori_recall error: {e}"), is_error: true },
+    }
+}
+
+async fn tool_memori_recall_summary(args: &serde_json::Value, _ctx: &PersonaToolContext) -> super::supervisor::ToolOutcome {
+    use super::supervisor::ToolOutcome;
+    let client = match get_memori_client() {
+        Ok(c) => c,
+        Err(e) => return e,
+    };
+    let date_start = args.get("date_start").and_then(|v| v.as_str()).map(String::from);
+    let date_end = args.get("date_end").and_then(|v| v.as_str()).map(String::from);
+    match client.recall_summary(date_start, date_end).await {
+        Ok(resp) => ToolOutcome { content: serde_json::to_string_pretty(&resp).unwrap_or_default(), is_error: false },
+        Err(e) => ToolOutcome { content: format!("memori_recall_summary error: {e}"), is_error: true },
+    }
+}
+
+async fn tool_memori_compaction(args: &serde_json::Value, _ctx: &PersonaToolContext) -> super::supervisor::ToolOutcome {
+    use super::supervisor::ToolOutcome;
+    let client = match get_memori_client() {
+        Ok(c) => c,
+        Err(e) => return e,
+    };
+    let session_id = args.get("session_id").and_then(|v| v.as_str()).map(String::from);
+    match client.compaction(session_id).await {
+        Ok(resp) => ToolOutcome { content: serde_json::to_string_pretty(&resp).unwrap_or_default(), is_error: false },
+        Err(e) => ToolOutcome { content: format!("memori_compaction error: {e}"), is_error: true },
+    }
+}
+
+async fn tool_memori_capture_turn(args: &serde_json::Value, _ctx: &PersonaToolContext, _task: &Task) -> super::supervisor::ToolOutcome {
+    use super::supervisor::ToolOutcome;
+    let client = match get_memori_client() {
+        Ok(c) => c,
+        Err(e) => return e,
+    };
+    let user_content = args.get("user_content").and_then(|v| v.as_str()).unwrap_or("");
+    let assistant_content = args.get("assistant_content").and_then(|v| v.as_str()).unwrap_or("");
+    match client.capture_turn(user_content, assistant_content).await {
+        Ok(_) => ToolOutcome { content: "Turn captured successfully".into(), is_error: false },
+        Err(e) => ToolOutcome { content: format!("memori_capture_turn error: {e}"), is_error: true },
+    }
+}
+
+async fn tool_memori_feedback(args: &serde_json::Value, _ctx: &PersonaToolContext, _task: &Task) -> super::supervisor::ToolOutcome {
+    use super::supervisor::ToolOutcome;
+    let client = match get_memori_client() {
+        Ok(c) => c,
+        Err(e) => return e,
+    };
+    let quality = args.get("quality").and_then(|v| v.as_str()).unwrap_or("neutral");
+    let details = args.get("details").and_then(|v| v.as_str()).unwrap_or("");
+    match client.feedback(quality, details).await {
+        Ok(_) => ToolOutcome { content: "Feedback recorded".into(), is_error: false },
+        Err(e) => ToolOutcome { content: format!("memori_feedback error: {e}"), is_error: true },
     }
 }

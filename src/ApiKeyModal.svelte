@@ -131,21 +131,21 @@
     z-index: 100;
   }
   .modal {
-    background: #1c1f26;
-    color: #e6e8eb;
+    background: var(--bg-elevated);
+    color: var(--text);
     border-radius: 12px;
     padding: 24px 28px;
     max-width: 540px;
     width: 100%;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-    border: 1px solid #2c313a;
+    border: 1px solid var(--border);
   }
   h2 { margin: 0 0 12px 0; font-size: 18px; }
   p { margin: 8px 0; line-height: 1.45; }
-  a { color: #6ea8ff; }
+  a { color: var(--info); }
 
   .key-row { display: flex; flex-direction: column; gap: 6px; margin: 12px 0 4px 0; }
-  .key-row > span { font-size: 12px; color: #b6bcc7; }
+  .key-row > span { font-size: 12px; color: var(--text-muted); }
   .input-row {
     display: flex;
     gap: 6px;
@@ -153,33 +153,33 @@
   }
   .input-row input {
     flex: 1;
-    background: #0f1217;
-    color: #e6e8eb;
-    border: 1px solid #2c313a;
+    background: var(--bg-input);
+    color: var(--text);
+    border: 1px solid var(--border);
     border-radius: 4px;
     padding: 8px 10px;
     font-family: ui-monospace, monospace;
     font-size: 13px;
   }
-  .input-row input:focus { outline: 1px solid #4a78c8; }
+  .input-row input:focus { outline: 1px solid var(--info); }
   button.small {
     padding: 6px 10px;
     font-size: 14px;
   }
 
-  .status { font-size: 13px; color: #b6bcc7; }
-  .status .ok { color: #6dd18f; }
-  .status .bad { color: #f09090; }
+  .status { font-size: 13px; color: var(--text-muted); }
+  .status .good { color: var(--success); }
+  .status .bad { color: var(--danger); }
 
   .error {
-    color: #f09090;
-    background: #2a1818;
-    border: 1px solid #8a3a3a;
+    color: var(--danger);
+    background: var(--danger-soft);
+    border: 1px solid var(--danger);
     border-radius: 4px;
     padding: 8px 10px;
     font-size: 12px;
   }
-  .hint { color: #6c7280; font-size: 12px; }
+  .hint { color: var(--text-muted); font-size: 12px; }
 
   .actions {
     display: flex;
@@ -194,19 +194,10 @@
     cursor: pointer;
     font-size: 14px;
   }
-  button.primary { background: #4a78c8; color: white; border-color: #4a78c8; }
-  button.primary:hover:not(:disabled) { background: #5a88d8; }
+  button.primary { background: var(--info); color: var(--text-inverse); border-color: var(--info); }
+  button.primary:hover:not(:disabled) { background: var(--info); }
   button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
-  button.ghost { background: transparent; color: #cfd3da; border-color: #3a414b; }
-  button.ghost:hover { background: #252932; }
-
-
-  /* ---- ApiKeyModal light theme ---- */
-  :global(html:not(.theme-dark)) .akm-modal { background: rgba(248,244,238,0.98); border-color: rgba(176,160,140,0.3); }
-  :global(html:not(.theme-dark)) .akm-title { color: #1a1c20; }
-  :global(html:not(.theme-dark)) .akm-label { color: #5a6068; }
-  :global(html:not(.theme-dark)) .akm-input { background: rgba(255,255,255,0.8); border-color: rgba(176,160,140,0.3); color: #1a1c20; }
-  :global(html:not(.theme-dark)) .akm-btn { background: rgba(176,120,120,0.85); border-color: transparent; color: #fff; }
-  :global(html:not(.theme-dark)) .akm-error { color: #a04040; }
+  button.ghost { background: transparent; color: var(--text); border-color: var(--border); }
+  button.ghost:hover { background: var(--bg-hover); }
 
 </style>

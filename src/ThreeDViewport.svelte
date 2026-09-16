@@ -632,7 +632,7 @@
     width: 100%;
     height: 100%;
     min-height: 0;
-    background: #1a1d23;
+    background: var(--bg-viewport, #1a1d23);
     overflow: hidden;
   }
   .three-canvas {
@@ -645,12 +645,12 @@
   .webgl-error {
     position: absolute; inset: 0;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    color: #cfd3da; gap: 8px;
+    color: var(--text); gap: 8px;
     padding: 24px; text-align: center;
   }
   .webgl-error div { font-size: 32px; }
   .webgl-error h3 { margin: 0; }
-  .webgl-error p { color: #8a8f99; max-width: 360px; }
+  .webgl-error p { color: var(--text-faint); max-width: 360px; }
 
   /* HUD overlays (camera presets, stats). They live inside the canvas
      container so they scale with the viewport, never with the page. */
@@ -659,10 +659,10 @@
     display: flex;
     gap: 4px;
     padding: 6px 8px;
-    background: rgba(20, 23, 28, 0.78);
-    border: 1px solid #2c313a;
+    background: var(--hud-bg, rgba(20, 23, 28, 0.78));
+    border: 1px solid var(--border);
     border-radius: 6px;
-    color: #c8d2e0;
+    color: var(--text);
     font-size: 11px;
     backdrop-filter: blur(6px);
     pointer-events: auto;
@@ -671,19 +671,13 @@
   .hud-tl { top: 10px; left: 10px; flex-wrap: wrap; max-width: calc(100% - 20px); }
   .hud-bl { bottom: 10px; left: 10px; gap: 10px; font-family: ui-monospace, monospace; }
   .hud button {
-    background: transparent; color: #c8d2e0;
-    border: 1px solid #2c313a; border-radius: 4px;
+    background: transparent; color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px;
     padding: 3px 8px; font: inherit; font-size: 11px;
     cursor: pointer;
   }
-  .hud button:hover { color: #fff; background: rgba(74, 120, 200, 0.18); border-color: #4a78c8; }
-  .hud button.on { color: #6dd18f; border-color: #6dd18f; background: rgba(109, 209, 143, 0.10); }
+  .hud button:hover { color: var(--text-inverse); background: rgba(74, 120, 200, 0.18); border-color: var(--info); }
+  .hud button.on { color: var(--success, #6dd18f); border-color: var(--success, #6dd18f); background: rgba(109, 209, 143, 0.10); }
   .hud span { white-space: nowrap; }
-
-
-  /* ---- ThreeDViewport light theme ---- */
-  :global(html:not(.theme-dark)) .tdv-canvas { background: #e8e4dc; }
-  :global(html:not(.theme-dark)) .tdv-overlay { background: rgba(242,238,232,0.7); color: #5a6068; }
-  :global(html:not(.theme-dark)) .tdv-crosshair { border-color: rgba(176,120,120,0.4); }
 
 </style>

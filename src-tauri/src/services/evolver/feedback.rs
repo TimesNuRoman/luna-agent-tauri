@@ -4,9 +4,14 @@
 //! `<evolver>/feedback/<uuid>.json`. Used by rollback (mandatory) and
 //! optionally by the UI for general feedback. The next diagnose run
 //! reads `status = open` entries and injects them into the LLM prompt.
+//!
+//! Also provides the artifact side-channel for the evolver feedback loop:
+//! `EvaluationResult` carries metrics + artifacts (build stderr, test output)
+//! that get rendered into LLM prompts for downstream evolution decisions.
 
 use super::LunaError;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 // =====================================================================
@@ -327,6 +332,267 @@ mod tests {
         assert!(s.contains("second issue"));
         assert!(s.contains("Open user feedback"));
     }
+
+    // ---------------------------------------------------------------------
+    // OE4: Artifact side-channel tests
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn evaluation_result_from_test_and_build_all_pass() {
+        let test_results = TestResults {
+            passed: 10,
+            failed: 0,
+            total: 10,
+            output: Some("all tests passed".to_string()),
+        };
+        let build_output = BuildOutput {
+            success: true,
+            warnings: 2,
+            duration_ms: 5000,
+            stderr: Some("warning: unused import".to_string()),
+        };
+
+        let eval = EvaluationResult::from_test_and_build(&test_results, &build_output);
+
+        assert_eq!(eval.metrics.get("tests_passed"), Some(&10.0));
+        assert_eq!(eval.metrics.get("tests_failed"), Some(&0.0));
+        assert_eq!(eval.metrics.get("compile_success"), Some(&1.0));
+        assert_eq!(eval.metrics.get("combined_score"), Some(&1.0));
+        assert!(eval.passed());
+
+        // Artifacts present
+        assert!(eval.artifacts.contains_key("build_stderr"));
+        assert!(eval.artifacts.contains_key("test_output"));
+    }
+
+    #[test]
+    fn evaluation_result_from_test_and_build_partial_fail() {
+        let test_results = TestResults {
+            passed: 7,
+            failed: 3,
+            total: 10,
+            output: None,
+        };
+        let build_output = BuildOutput {
+            success: false,
+            warnings: 5,
+            duration_ms: 3000,
+            stderr: Some("error: unknown type".to_string()),
+        };
+
+        let eval = EvaluationResult::from_test_and_build(&test_results, &build_output);
+
+        assert_eq!(eval.metrics.get("tests_passed"), Some(&7.0));
+        assert_eq!(eval.metrics.get("tests_failed"), Some(&3.0));
+        assert_eq!(eval.metrics.get("compile_success"), Some(&0.0));
+        // combined_score = (0.7 + 0.0) / 2.0 = 0.35
+        assert_eq!(eval.metrics.get("combined_score"), Some(&0.35));
+        assert!(!eval.passed());
+    }
+
+    #[test]
+    fn evaluation_result_artifact_truncation() {
+        // Build output with very large stderr
+        let large_stderr = "x".repeat(50_000);
+        let build_output = BuildOutput {
+            success: true,
+            warnings: 0,
+            duration_ms: 100,
+            stderr: Some(large_stderr),
+        };
+        let test_results = TestResults::default();
+
+        let eval = EvaluationResult::from_test_and_build(&test_results, &build_output);
+
+        // Artifact should be truncated to MAX_ARTIFACT_BYTES
+        let artifact = eval.artifacts.get("build_stderr").unwrap();
+        assert!(artifact.len() <= MAX_ARTIFACT_BYTES);
+        assert!(!artifact.contains("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"));
+    }
+
+    #[test]
+    fn evaluation_result_empty_artifacts_when_no_stderr_or_output() {
+        let test_results = TestResults::default();
+        let build_output = BuildOutput {
+            success: true,
+            warnings: 0,
+            duration_ms: 100,
+            stderr: None,
+        };
+
+        let eval = EvaluationResult::from_test_and_build(&test_results, &build_output);
+
+        assert!(eval.artifacts.is_empty());
+    }
+
+    #[test]
+    fn render_artifacts_for_prompt_empty() {
+        let eval = EvaluationResult::default();
+        let rendered = render_artifacts_for_prompt(&eval);
+        assert!(rendered.is_empty());
+    }
+
+    #[test]
+    fn render_artifacts_for_prompt_formats_correctly() {
+        let mut artifacts = HashMap::new();
+        artifacts.insert("build_stderr".to_string(), "error: not found".to_string());
+        artifacts.insert("test_output".to_string(), "PASSED".to_string());
+        let eval = EvaluationResult {
+            metrics: HashMap::new(),
+            artifacts,
+        };
+
+        let rendered = render_artifacts_for_prompt(&eval);
+        assert!(rendered.contains("--- build_stderr ---"));
+        assert!(rendered.contains("error: not found"));
+        assert!(rendered.contains("--- test_output ---"));
+        assert!(rendered.contains("PASSED"));
+    }
+
+    #[test]
+    fn test_results_default_is_zero() {
+        let t = TestResults::default();
+        assert_eq!(t.passed, 0);
+        assert_eq!(t.failed, 0);
+        assert_eq!(t.total, 0);
+        assert!(t.output.is_none());
+    }
+
+    #[test]
+    fn evaluation_result_serializable() {
+        let test_results = TestResults {
+            passed: 5,
+            failed: 1,
+            total: 6,
+            output: Some("ok".to_string()),
+        };
+        let build_output = BuildOutput {
+            success: true,
+            warnings: 0,
+            duration_ms: 100,
+            stderr: None,
+        };
+        let eval = EvaluationResult::from_test_and_build(&test_results, &build_output);
+
+        let json = serde_json::to_string(&eval).unwrap();
+        let deserialized: EvaluationResult = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.metrics.get("tests_passed"), Some(&5.0));
+        assert_eq!(deserialized.artifacts.get("test_output").unwrap(), "ok");
+    }
+}
+
+// =====================================================================
+// Artifact side-channel (OE4)
+// =====================================================================
+
+/// Maximum size for any single artifact (20 KB).
+const MAX_ARTIFACT_BYTES: usize = 20_000;
+
+/// Test results from a candidate evaluation run.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TestResults {
+    pub passed: usize,
+    pub failed: usize,
+    pub total: usize,
+    pub output: Option<String>,
+}
+
+/// Build output from a cargo build / compile attempt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuildOutput {
+    pub success: bool,
+    pub warnings: usize,
+    pub duration_ms: u64,
+    pub stderr: Option<String>,
+}
+
+/// Evaluation result that flows through the evolver feedback pipeline.
+///
+/// Carries both quantitative `metrics` and a qualitative `artifacts`
+/// side-channel. Artifacts (build stderr, test output, etc.) are
+/// truncated to `MAX_ARTIFACT_BYTES` so they can safely be rendered
+/// into LLM prompts without exceeding context limits.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvaluationResult {
+    /// Named numeric metrics, e.g. `"tests_passed"`, `"compile_success"`.
+    pub metrics: HashMap<String, f64>,
+    /// Artifact side-channel: name → truncated content.
+    /// Rendered into LLM prompts as `{artifacts}` variable.
+    #[serde(default)]
+    pub artifacts: HashMap<String, String>,
+}
+
+impl EvaluationResult {
+    /// Build an `EvaluationResult` from test results and build output.
+    ///
+    /// This is the core of the OE4 artifact side-channel: build stderr and
+    /// test output are passed through as artifacts so the LLM can reason
+    /// about *why* a candidate passed or failed, not just the final score.
+    pub fn from_test_and_build(test_results: &TestResults, build_output: &BuildOutput) -> Self {
+        let mut metrics = HashMap::new();
+
+        // Test metrics
+        metrics.insert("tests_passed".to_string(), test_results.passed as f64);
+        metrics.insert("tests_failed".to_string(), test_results.failed as f64);
+        metrics.insert("tests_total".to_string(), test_results.total as f64);
+
+        // Build metrics
+        metrics.insert(
+            "compile_success".to_string(),
+            if build_output.success { 1.0 } else { 0.0 },
+        );
+        metrics.insert("compile_warnings".to_string(), build_output.warnings as f64);
+        metrics.insert("compile_time_ms".to_string(), build_output.duration_ms as f64);
+
+        // Combined score
+        let test_score = if test_results.total > 0 {
+            test_results.passed as f64 / test_results.total as f64
+        } else {
+            0.0
+        };
+        let compile_score = if build_output.success { 1.0 } else { 0.0 };
+        metrics.insert(
+            "combined_score".to_string(),
+            (test_score + compile_score) / 2.0,
+        );
+
+        // Artifacts — truncated to MAX_ARTIFACT_BYTES each
+        let mut artifacts = HashMap::new();
+        if let Some(ref stderr) = build_output.stderr {
+            let truncated = stderr.chars().take(MAX_ARTIFACT_BYTES).collect::<String>();
+            artifacts.insert("build_stderr".to_string(), truncated);
+        }
+        if let Some(ref test_output) = test_results.output {
+            let truncated = test_output.chars().take(MAX_ARTIFACT_BYTES).collect::<String>();
+            artifacts.insert("test_output".to_string(), truncated);
+        }
+
+        EvaluationResult { metrics, artifacts }
+    }
+
+    /// Returns true if the combined score meets the default pass threshold.
+    pub fn passed(&self) -> bool {
+        self.metrics
+            .get("combined_score")
+            .copied()
+            .unwrap_or(0.0)
+            >= 0.5
+    }
+}
+
+/// Render artifacts into a prompt string for LLM consumption.
+///
+/// Each artifact is rendered as `--- <name> ---\n<content>\n`.
+pub fn render_artifacts_for_prompt(evaluation: &EvaluationResult) -> String {
+    if evaluation.artifacts.is_empty() {
+        return String::new();
+    }
+    let mut s = String::new();
+    for (name, content) in &evaluation.artifacts {
+        s.push_str(&format!("--- {name} ---\n{content}\n"));
+    }
+    s
 }
 
 // Helper re-export so callers (e.g. updater.rs) can construct paths
