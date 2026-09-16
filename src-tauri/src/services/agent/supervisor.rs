@@ -368,7 +368,7 @@ async fn tool_read_file(args: &serde_json::Value, source_root: &std::path::Path)
     } else {
         source_root.join(path)
     };
-    match std::fs::read_to_string(&abs) {
+    match tokio::fs::read_to_string(&abs).await {
         Ok(s) => {
             // Cap to 200KB to avoid blowing context.
             if s.len() > 200_000 {
@@ -446,7 +446,7 @@ async fn tool_search_workspace(
         if !matches!(ext, "rs" | "ts" | "tsx" | "js" | "svelte" | "json" | "md" | "toml" | "py" | "go") {
             continue;
         }
-        let Ok(content) = std::fs::read_to_string(path) else { continue };
+        let Ok(content) = tokio::fs::read_to_string(path).await else { continue };
         for (lineno, line) in content.lines().enumerate() {
             if line.contains(query) {
                 let rel = path.strip_prefix(source_root).unwrap_or(path);
@@ -625,27 +625,35 @@ async fn tool_create_file(args: &serde_json::Value, source_root: &std::path::Pat
     // Create parent directories if they don't exist
     if let Some(parent) = abs.parent() {
         if !parent.exists() {
-            match std::fs::create_dir_all(parent) {
-                Ok(_) => {}
-                Err(e) => {
-                    return ToolOutcome {
-                        content: format!("error: failed to create parent directory: {}", e),
-                        is_error: true,
-                    };
-                }
+            if let Err(e) = tokio::fs::create_dir_all(parent).await {
+                return ToolOutcome {
+                    content: format!("error: failed to create parent directory: {}", e),
+                    is_error: true,
+                };
             }
         }
     }
 
-    match std::fs::write(&abs, content) {
-        Ok(_) => ToolOutcome {
-            content: format!("ok: created file {} ({} bytes)", abs.display(), content.len()),
-            is_error: false,
-        },
-        Err(e) => ToolOutcome {
-            content: format!("error: failed to create file: {}", e),
+    // Atomic write via tmp+rename so a partial write never leaves a
+    // half-baked file on disk. Mirrors the pattern in lib.rs:1259.
+    let tmp = abs.with_extension("tmp");
+    if let Err(e) = tokio::fs::write(&tmp, content).await {
+        return ToolOutcome {
+            content: format!("error: failed to write tmp file: {}", e),
             is_error: true,
-        },
+        };
+    }
+    if let Err(e) = tokio::fs::rename(&tmp, &abs).await {
+        // Best-effort cleanup of orphan tmp.
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return ToolOutcome {
+            content: format!("error: failed to rename tmp to target: {}", e),
+            is_error: true,
+        };
+    }
+    ToolOutcome {
+        content: format!("ok: created file {} ({} bytes)", abs.display(), content.len()),
+        is_error: false,
     }
 }
 
@@ -669,7 +677,7 @@ async fn tool_edit_file(args: &serde_json::Value, source_root: &std::path::Path)
         source_root.join(path)
     };
 
-    let current = match std::fs::read_to_string(&abs) {
+    let current = match tokio::fs::read_to_string(&abs).await {
         Ok(c) => c,
         Err(e) => {
             return ToolOutcome {
@@ -690,20 +698,29 @@ async fn tool_edit_file(args: &serde_json::Value, source_root: &std::path::Path)
 
     let new_content = current.replace(old_string, new_string);
 
-    match std::fs::write(&abs, &new_content) {
-        Ok(_) => ToolOutcome {
-            content: format!(
-                "ok: edited file {} ({} → {} bytes)",
-                abs.display(),
-                current.len(),
-                new_content.len()
-            ),
-            is_error: false,
-        },
-        Err(e) => ToolOutcome {
-            content: format!("error: failed to write file: {}", e),
+    // Atomic write via tmp+rename.
+    let tmp = abs.with_extension("tmp");
+    if let Err(e) = tokio::fs::write(&tmp, &new_content).await {
+        return ToolOutcome {
+            content: format!("error: failed to write tmp file: {}", e),
             is_error: true,
-        },
+        };
+    }
+    if let Err(e) = tokio::fs::rename(&tmp, &abs).await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return ToolOutcome {
+            content: format!("error: failed to rename tmp to target: {}", e),
+            is_error: true,
+        };
+    }
+    ToolOutcome {
+        content: format!(
+            "ok: edited file {} ({} → {} bytes)",
+            abs.display(),
+            current.len(),
+            new_content.len()
+        ),
+        is_error: false,
     }
 }
 
