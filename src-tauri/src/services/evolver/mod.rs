@@ -17,20 +17,12 @@
 //! and can run concurrently with an in-flight cycle.
 
 pub mod diagnose;
-pub mod debug;
 pub mod feedback;
 pub mod inspect;
-pub mod island_migration;
-pub mod map_elites;
 pub mod planner;
-pub mod prompt_evolve;
-pub mod novelty_judge;
-pub mod evaluator;
-pub mod protected;
 pub mod sandbox;
 pub mod snapshot;
 pub mod updater;
-pub mod worker;
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};

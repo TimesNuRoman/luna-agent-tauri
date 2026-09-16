@@ -53,7 +53,7 @@ pub use luna_core::{LunaError, LunaErrorSerde, CoreState};
 pub use luna_core::types::*;
 
 // Headless browser
-pub use crate::services::_stubs::azazel_headless::{HeadlessBrowserConfig, HeadlessBrowserSession};
+pub use crate::services::azazel_headless::{HeadlessBrowserConfig, HeadlessBrowserSession};
 
 // =====================================================================
 // Application State (GUI mode only)
@@ -1245,6 +1245,14 @@ fn atomic_write(full: &Path, content: &str) -> std::io::Result<u64> {
     std::fs::write(&tmp, content)?;
     std::fs::rename(&tmp, full)?;
     Ok(content.len() as u64)
+}
+
+/// Sync string-typed shim around `atomic_write` for callers that already
+/// have a `&str` in hand (e.g. JSON-serialized chat history). Returns
+/// `()` instead of the byte count because none of the sync callers
+/// currently inspect the size.
+fn atomic_write_str(path: &Path, body: &str) -> std::io::Result<()> {
+    atomic_write(path, body).map(|_| ())
 }
 
 /// Async atomic write helper: write to `<file>.tmp` then rename over the
