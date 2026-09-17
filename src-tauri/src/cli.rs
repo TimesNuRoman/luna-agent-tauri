@@ -111,6 +111,19 @@ struct Cli {
         help = "Seconds to warm the session before the first navigate (0 = off)"
     )]
     warm_session: Option<u64>,
+
+    // --- PR-2 network policy --------------------------------------
+    //
+    // Comma-separated allowlist for browser navigation. Overrides
+    // the LUNA_BROWSER_ALLOWED_DOMAINS env var when set. Format
+    // matches the env var: `example.com,*.api.test,*.cdn.io`.
+    // Empty / unset = allow all (permissive mode).
+    #[arg(
+        long,
+        value_name = "CSV",
+        help = "Comma-separated domain allowlist for browser automation (overrides LUNA_BROWSER_ALLOWED_DOMAINS). Empty = allow all."
+    )]
+    allowed_domains: Option<String>,
 }
 
 #[tokio::main]
@@ -161,6 +174,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize core state
     let core_state = Arc::new(luna_core::CoreState::new());
     let api_state = cli_api::ApiState::new(core_state);
+
+    // PR-2 network policy: if the operator passed
+    // --allowed-domains, propagate it into the env so any
+    // downstream `BrowserSession::launch` (called from the HTTP
+    // API or a future azazel CLI command) reads the CLI value
+    // instead of the one baked into a service-unit env file.
+    // `set_var` is unsafe in multi-threaded contexts after Rust
+    // 1.74, but the CLI is the very first thing running, so
+    // it's safe here.
+    if let Some(csv) = cli.allowed_domains.as_deref() {
+        if !csv.trim().is_empty() {
+            std::env::set_var(
+                crate::services::azazel::network_policy::ENV_ALLOWED_DOMAINS,
+                csv,
+            );
+            tracing::info!(
+                target: "luna.azazel",
+                domains = csv,
+                "PR-2 network policy override set via --allowed-domains"
+            );
+        }
+    }
 
     // Start HTTP API server
     tracing::info!("Starting HTTP API server on {}", cli.api_addr);

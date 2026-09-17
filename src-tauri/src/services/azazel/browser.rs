@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
 
+use crate::services::azazel::network_policy::NetworkPolicy;
 use crate::services::azazel::state::BrowserFrame;
 use crate::services::azazel::stealth::StealthConfig;
 use crate::services::azazel::stealth_js::STEALTH_JS;
@@ -75,6 +76,13 @@ pub struct LaunchConfig {
     /// installed via `Page.evaluate_on_new_document` before any
     /// user script runs. `None` ⇒ fully stealth-disabled (default).
     pub stealth: Option<StealthConfig>,
+    /// Network policy (Fetch.enable + domain allowlist). When
+    /// `Some`, the policy is installed on the browser immediately
+    /// after launch. When `None` (default), the policy is built
+    /// from the `LUNA_BROWSER_ALLOWED_DOMAINS` env var — which
+    /// falls back to permissive mode if unset. Pass `Some(policy)`
+    /// to inject an explicit CLI-derived list.
+    pub network_policy: Option<std::sync::Arc<NetworkPolicy>>,
 }
 
 impl LaunchConfig {
@@ -86,6 +94,7 @@ impl LaunchConfig {
             window_size: (1280, 720),
             extra_args: Vec::new(),
             stealth: None,
+            network_policy: None,
         }
     }
 }
@@ -124,6 +133,12 @@ struct BrowserInner {
     /// `new_page` call installs the STEALTH_JS payload before any
     /// user script runs. `None` ⇒ no JS injection.
     stealth: Option<StealthConfig>,
+    /// Network policy (Fetch.enable + domain allowlist). Always
+    /// present after `launch` — default is permissive (allow all)
+    /// when no env var is set. The `install` task spawned at
+    /// launch owns the listener; we keep an `Arc` here so
+    /// `audit()` can be called from any handle.
+    network_policy: std::sync::Arc<NetworkPolicy>,
 }
 
 impl BrowserSession {
@@ -177,12 +192,31 @@ impl BrowserSession {
             .await
             .map_err(|e| BrowserError::Launch(format!("launch: {e}")))?;
 
+        // Network policy: build from caller-supplied Arc, else from
+        // env var, else permissive. `install` sends `Fetch.enable`
+        // on the browser-level channel and spawns the requestPaused
+        // listener task. Failures here are logged but do NOT fail
+        // the launch — the agent is still useful without a policy.
+        let policy = config
+            .network_policy
+            .clone()
+            .unwrap_or_else(|| std::sync::Arc::new(NetworkPolicy::from_env()));
+        let policy_for_audit = std::sync::Arc::clone(&policy);
+        if let Err(e) = std::sync::Arc::clone(&policy).install(&browser, "init").await {
+            tracing::warn!(
+                target: "luna.azazel",
+                error = %e,
+                "network policy install failed — continuing in permissive mode"
+            );
+        }
+
         Ok(Self {
             inner: Arc::new(BrowserInner {
                 browser,
                 _handler: handler,
                 closed: AtomicBool::new(false),
                 stealth: config.stealth,
+                network_policy: policy_for_audit,
             }),
         })
     }
@@ -261,6 +295,20 @@ impl BrowserSession {
     /// Phase Z0 callers should prefer `mark_closed()`.
     pub fn raw(&self) -> &CxBrowser {
         &self.inner.browser
+    }
+
+    /// Snapshot of the network policy's audit log (every URL that
+    /// was blocked since launch). Empty unless the policy was
+    /// configured with a non-empty allowlist AND something was
+    /// actually blocked.
+    pub fn network_audit(&self) -> Vec<crate::services::azazel::network_policy::BlockedRequest> {
+        self.inner.network_policy.audit()
+    }
+
+    /// True if the network policy is in restrictive (non-empty
+    /// allowlist) mode. Useful for UIs to surface the state.
+    pub fn network_policy_active(&self) -> bool {
+        !self.inner.network_policy.rules_empty()
     }
 }
 

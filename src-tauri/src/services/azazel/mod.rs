@@ -18,6 +18,7 @@
 //! approval gates / UI — это Phase Z1+.
 
 pub mod browser;
+pub mod network_policy;
 pub mod prompts;
 pub mod safety;
 pub mod state;
