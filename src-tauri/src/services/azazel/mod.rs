@@ -19,6 +19,7 @@
 
 pub mod browser;
 pub mod network_policy;
+pub mod subagent_driver;
 pub mod prompts;
 pub mod safety;
 pub mod state;

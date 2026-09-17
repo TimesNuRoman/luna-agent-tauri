@@ -454,6 +454,25 @@ impl TaskPage {
         }
     }
 
+    /// Evaluate an arbitrary JavaScript expression on the active page and
+    /// return the result coerced to string. The caller is responsible for
+    /// wrapping the expression in an IIFE that returns the value to capture
+    /// (see `subagent_driver::dispatch_step` for the convention).
+    ///
+    /// Used by the sub-agent driver to provide a generic "Js" plan step.
+    /// Kept small intentionally — the broader `evaluate()` API is internal.
+    pub async fn evaluate_inline_js(&self, expression: &str) -> Result<String, String> {
+        if expression.trim().is_empty() {
+            return Err("expression must not be empty".into());
+        }
+        let v = self
+            .page
+            .evaluate(expression)
+            .await
+            .map_err(|e| format!("eval: {e}"))?;
+        Ok(v.into_value().unwrap_or_default())
+    }
+
     /// Press a single keyboard key. We dispatch `keydown`, `keypress`
     /// (legacy), and `keyup` on `document.activeElement`. The
     /// `key` string is what the page's JS sees (e.g. "Enter",
